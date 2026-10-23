@@ -74,7 +74,106 @@ async function validarUsuarioAdmin(
   return validarPerfilAdmin(client, user.id)
 }
 
-type AdminView = 'login' | 'recovery-request' | 'recovery-verify' | 'recovery-password'
+type RecoveryCallback =
+  | { kind: 'invalid'; expired: boolean }
+  | { kind: 'code'; code: string }
+  | { kind: 'tokens'; accessToken: string; refreshToken: string }
+
+type AdminView = 'login' | 'recovery-request' | 'recovery-password'
+type RecoveryResult = { view: AdminView; message: string; userId: string | null }
+
+function consumirCallbackRecuperacao(): RecoveryCallback | null {
+  const url = new URL(window.location.href)
+  const hash = new URLSearchParams(url.hash.replace(/^#/, ''))
+  const errorCode = url.searchParams.get('error_code') ?? hash.get('error_code')
+  const error = url.searchParams.get('error') ?? hash.get('error')
+  const errorDescription = url.searchParams.get('error_description') ?? hash.get('error_description')
+  const type = url.searchParams.get('type') ?? hash.get('type')
+  const code = url.searchParams.get('code')
+  const accessToken = hash.get('access_token')
+  const refreshToken = hash.get('refresh_token')
+  const isRecoveryCallback = type === 'recovery' || Boolean(errorCode || error || errorDescription || code)
+
+  if (!isRecoveryCallback) return null
+
+  window.history.replaceState(window.history.state, document.title, url.pathname)
+
+  if (errorCode || error || errorDescription) {
+    const expired = errorCode === 'otp_expired' || error === 'otp_expired' || errorDescription?.toLowerCase().includes('expired')
+    return { kind: 'invalid', expired: Boolean(expired) }
+  }
+  if (code) return { kind: 'code', code }
+  if (type === 'recovery' && accessToken && refreshToken) {
+    return { kind: 'tokens', accessToken, refreshToken }
+  }
+  return { kind: 'invalid', expired: false }
+}
+
+async function processarCallbackRecuperacao(
+  client: NonNullable<typeof supabase>,
+  adminLoginEmail: string,
+  callback: RecoveryCallback,
+): Promise<RecoveryResult> {
+  if (callback.kind === 'invalid') {
+    const result = await encerrarSessao(client, 'O link de recuperação expirou ou é inválido.')
+    if (result.mensagem.includes('Não foi possível encerrar')) {
+      return { view: 'recovery-request', message: result.mensagem, userId: null }
+    }
+    return {
+      view: 'recovery-request',
+      message: callback.expired ? 'O link de recuperação expirou. Solicite um novo link.' : result.mensagem,
+      userId: null,
+    }
+  }
+
+  try {
+    const sessionResult = callback.kind === 'code'
+      ? await client.auth.exchangeCodeForSession(callback.code)
+      : await client.auth.setSession({
+          access_token: callback.accessToken,
+          refresh_token: callback.refreshToken,
+        })
+    if (sessionResult.error) {
+      const expired = 'code' in sessionResult.error && sessionResult.error.code === 'otp_expired'
+      const result = await encerrarSessao(client, 'O link de recuperação expirou ou é inválido.')
+      if (result.mensagem.includes('Não foi possível encerrar')) {
+        return { view: 'recovery-request', message: result.mensagem, userId: null }
+      }
+      return {
+        view: 'recovery-request',
+        message: expired ? 'O link de recuperação expirou. Solicite um novo link.' : result.mensagem,
+        userId: null,
+      }
+    }
+    if (!sessionResult.data.user) {
+      const result = await encerrarSessao(client, 'Não foi possível validar o link de recuperação.')
+      return { view: 'recovery-request', message: result.mensagem, userId: null }
+    }
+
+    const { data, error } = await client.auth.getUser()
+    if (error || !data.user || data.user.id !== sessionResult.data.user.id) {
+      const result = await encerrarSessao(client, 'Não foi possível validar o link de recuperação.')
+      return { view: 'recovery-request', message: result.mensagem, userId: null }
+    }
+
+    const authorization = await validarUsuarioAdmin(client, data.user, adminLoginEmail, sessionResult.data.user.id)
+    if (!authorization.autorizado) {
+      return {
+        view: 'login',
+        message: 'Este link não corresponde à conta administrativa autorizada.',
+        userId: null,
+      }
+    }
+    return {
+      view: 'recovery-password',
+      message: 'Link validado. Defina uma nova senha para a conta administrativa.',
+      userId: data.user.id,
+    }
+  } catch {
+    const result = await encerrarSessao(client, 'O link de recuperação não pôde ser validado.')
+    return { view: 'recovery-request', message: result.mensagem, userId: null }
+  }
+}
 
 function AdminPage({ onBack }: { onBack: () => void }) {
   const client = supabase
@@ -84,27 +183,44 @@ function AdminPage({ onBack }: { onBack: () => void }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [passwordConfirmation, setPasswordConfirmation] = useState('')
-  const [recoveryCode, setRecoveryCode] = useState('')
   const [recoveryUserId, setRecoveryUserId] = useState<string | null>(null)
-  const [recoveryAttempts, setRecoveryAttempts] = useState(0)
   const [showPassword, setShowPassword] = useState(false)
   const [message, setMessage] = useState('')
   const [loadingMessage, setLoadingMessage] = useState<string | null>('Verificando sessão…')
   const [autorizado, setAutorizado] = useState(false)
   const submitting = useRef(false)
   const recoveryRequestCooldown = useRef(0)
+  const recoveryCallbackRef = useRef<RecoveryCallback | null | undefined>(undefined)
+  const recoveryCallbackResultRef = useRef<Promise<RecoveryResult> | null>(null)
   const configurationIncomplete = !client || !adminLoginEmail
 
   useEffect(() => {
     let active = true
     const verificarSessao = async () => {
+      const callback = recoveryCallbackRef.current === undefined
+        ? consumirCallbackRecuperacao()
+        : recoveryCallbackRef.current
+      recoveryCallbackRef.current = callback
       if (!client || !adminLoginEmail) {
+        if (callback) setView('recovery-request')
         setMessage('A configuração administrativa está incompleta. Verifique as variáveis do Supabase e do login admin.')
         setLoadingMessage(null)
         return
       }
 
       try {
+        if (callback) {
+          setLoadingMessage('Validando link de recuperação…')
+          recoveryCallbackResultRef.current ??= processarCallbackRecuperacao(client, adminLoginEmail, callback)
+          const result = await recoveryCallbackResultRef.current
+          if (active) {
+            setRecoveryUserId(result.userId)
+            setView(result.view)
+            setMessage(result.message)
+          }
+          return
+        }
+
         const { data, error } = await client.auth.getSession()
         if (error) {
           const resultado = await encerrarSessao(client, 'Não foi possível verificar a sessão.')
@@ -183,73 +299,16 @@ function AdminPage({ onBack }: { onBack: () => void }) {
     setMessage('')
     try {
       recoveryRequestCooldown.current = Date.now() + 60_000
-      const { error } = await client.auth.resetPasswordForEmail(adminLoginEmail)
+      const redirectTo = new URL('admin', `${window.location.origin}${import.meta.env.BASE_URL}`).toString()
+      const { error } = await client.auth.resetPasswordForEmail(adminLoginEmail, { redirectTo })
       if (error) {
-        setMessage('Não foi possível solicitar o código agora. Aguarde e tente novamente.')
+        setMessage('Não foi possível solicitar o link agora. Aguarde e tente novamente.')
         return
       }
-      setRecoveryCode('')
-      setRecoveryAttempts(0)
-      setView('recovery-verify')
-      setMessage('Se a conta administrativa estiver disponível, um código será enviado. Aguarde 60 segundos antes de pedir outro.')
+      setView('login')
+      setMessage('Se a conta administrativa estiver disponível, um link de recuperação será enviado. Aguarde 60 segundos antes de pedir outro.')
     } catch {
-      setMessage('Não foi possível solicitar o código agora. Aguarde e tente novamente.')
-    } finally {
-      submitting.current = false
-      setLoadingMessage(null)
-    }
-  }
-
-  const verificarCodigo = async (event: React.FormEvent) => {
-    event.preventDefault()
-    if (!client || configurationIncomplete || loadingMessage || submitting.current) return
-    const code = recoveryCode.trim()
-    if (!/^\d{6}$/.test(code)) {
-      setMessage('Digite o código numérico de seis dígitos recebido por e-mail.')
-      return
-    }
-
-    submitting.current = true
-    setLoadingMessage('Validando código…')
-    setMessage('')
-    try {
-      const { data, error } = await client.auth.verifyOtp({
-        email: adminLoginEmail,
-        token: code,
-        type: 'recovery',
-      })
-      if (error || !data.user) {
-        const attempts = recoveryAttempts + 1
-        setRecoveryAttempts(attempts)
-        setRecoveryCode('')
-        if (attempts >= 5) {
-          setView('recovery-request')
-          setMessage('O código não foi aceito após várias tentativas. Solicite um novo código.')
-        } else if (error && 'code' in error && error.code === 'otp_expired') {
-          setMessage('O código expirou ou já foi usado. Solicite um novo código.')
-        } else {
-          setMessage('Código inválido ou expirado. Confira e tente novamente.')
-        }
-        return
-      }
-
-      const resultado = await validarUsuarioAdmin(client, data.user, adminLoginEmail)
-      if (!resultado.autorizado) {
-        setRecoveryCode('')
-        setView('login')
-        setMessage('Não foi possível confirmar a autorização administrativa. Entre em contato com o responsável.')
-        return
-      }
-
-      setRecoveryUserId(data.user.id)
-      setRecoveryCode('')
-      setView('recovery-password')
-      setMessage('Código validado. Defina uma nova senha para a conta administrativa.')
-    } catch {
-      const resultado = await encerrarSessao(client, 'Não foi possível validar o código.')
-      setRecoveryCode('')
-      setView('recovery-request')
-      setMessage(resultado.mensagem)
+      setMessage('Não foi possível solicitar o link agora. Aguarde e tente novamente.')
     } finally {
       submitting.current = false
       setLoadingMessage(null)
@@ -375,16 +434,9 @@ function AdminPage({ onBack }: { onBack: () => void }) {
         </form>
       ) : !loadingMessage && view === 'recovery-request' ? (
         <form onSubmit={(event) => void solicitarRecuperacao(event)}>
-          <p>Solicite um código numérico de recuperação para a conta administrativa.</p>
-          <button className="primary-action" type="submit" disabled={configurationIncomplete}>Enviar código</button>
+          <p>Solicite um link de recuperação para a conta administrativa. O link será enviado ao e-mail associado a essa conta.</p>
+          <button className="primary-action" type="submit" disabled={configurationIncomplete}>Enviar link de recuperação</button>
           <button type="button" onClick={() => { setView('login'); setMessage('') }}>Voltar ao login</button>
-        </form>
-      ) : !loadingMessage && view === 'recovery-verify' ? (
-        <form onSubmit={(event) => void verificarCodigo(event)}>
-          <p>Digite o código de seis dígitos enviado ao e-mail da conta administrativa.</p>
-          <label>Código de recuperação<input type="text" value={recoveryCode} onChange={(event) => setRecoveryCode(event.target.value.replace(/\D/g, '').slice(0, 6))} required inputMode="numeric" autoComplete="one-time-code" pattern="\d{6}" aria-label="Código de recuperação de seis dígitos" /></label>
-          <button className="primary-action" type="submit">Validar código</button>
-          <button type="button" onClick={() => { setView('recovery-request'); setRecoveryCode(''); setMessage('') }}>Solicitar outro código</button>
         </form>
       ) : !loadingMessage && view === 'recovery-password' ? (
         <form onSubmit={(event) => void atualizarSenha(event)}>
