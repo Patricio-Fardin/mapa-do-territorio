@@ -25,11 +25,187 @@ function PersistedLayers({ quadras, onSelect, layers }: { quadras: Quadra[]; onS
   const map = useMap(); useEffect(() => { const group = new L.FeatureGroup().addTo(map); quadras.forEach((quadra) => { if (!quadra.geometria) return; const layer = L.geoJSON(quadra.geometria as GeoJSON.GeoJsonObject); layer.eachLayer((item) => { aplicarEstilo(item, quadra.situacao); item.on('click', () => onSelect(quadra.id)); layers.current.set(quadra.id, item); group.addLayer(item) }) }); return () => { map.removeLayer(group); quadras.forEach((q) => layers.current.delete(q.id)) } }, [map, quadras, onSelect, layers]); return null
 }
 
+type ResultadoAutorizacao = { autorizado: true } | { autorizado: false; mensagem: string }
+
+async function encerrarSessao(client: NonNullable<typeof supabase>, mensagem: string): Promise<ResultadoAutorizacao> {
+  try {
+    const { error } = await client.auth.signOut({ scope: 'local' })
+    if (error) {
+      return { autorizado: false, mensagem: `${mensagem} Não foi possível encerrar a sessão; tente sair novamente.` }
+    }
+  } catch {
+    return { autorizado: false, mensagem: `${mensagem} Não foi possível encerrar a sessão; tente sair novamente.` }
+  }
+  return { autorizado: false, mensagem: `${mensagem} A sessão foi encerrada.` }
+}
+
+async function validarPerfilAdmin(client: NonNullable<typeof supabase>, userId: string): Promise<ResultadoAutorizacao> {
+  try {
+    const { data, error } = await client.from('perfis').select('papel').eq('user_id', userId).maybeSingle()
+    if (error) {
+      return encerrarSessao(client, 'Não foi possível verificar a autorização administrativa. A sessão foi encerrada.')
+    }
+    if (data?.papel !== 'admin') {
+      return encerrarSessao(client, 'Este usuário não possui autorização administrativa. A sessão foi encerrada.')
+    }
+    return { autorizado: true }
+  } catch {
+    return encerrarSessao(client, 'Não foi possível verificar a autorização administrativa. A sessão foi encerrada.')
+  }
+}
+
+function mensagemDeErroMagicLink(): string | null {
+  const hash = window.location.hash.replace(/^#/, '')
+  if (!hash) return null
+
+  const params = new URLSearchParams(hash)
+  const errorCode = params.get('error_code')
+  const error = params.get('error')
+  const description = params.get('error_description')
+
+  if (errorCode === 'otp_expired' || error === 'otp_expired') {
+    return 'O link de acesso expirou ou já foi usado. Solicite um novo link e tente novamente.'
+  }
+
+  if (errorCode === 'access_denied' || error === 'access_denied') {
+    return 'O link de acesso não pôde ser concluído. Solicite um novo link com uma conta administrativa autorizada.'
+  }
+
+  if (errorCode || error || description) {
+    return 'O link de acesso não pôde ser concluído. Solicite um novo link e tente novamente.'
+  }
+
+  return null
+}
+
 function AdminPage({ onBack }: { onBack: () => void }) {
-  const [email, setEmail] = useState(''); const [code, setCode] = useState(''); const [sent, setSent] = useState(false); const [message, setMessage] = useState(''); const [loading, setLoading] = useState(false)
-  const enviarCodigo = async (event: React.FormEvent) => { event.preventDefault(); if (!supabase) { setMessage('Configure o Supabase em .env.local.'); return }; setLoading(true); setMessage(''); const result = await supabase.auth.signInWithOtp({ email, options: { shouldCreateUser: false } }); setMessage(result.error ? result.error.message : 'Código enviado. Verifique o e-mail.'); if (!result.error) setSent(true); setLoading(false) }
-  const confirmarCodigo = async (event: React.FormEvent) => { event.preventDefault(); if (!supabase) return; setLoading(true); setMessage(''); const result = await supabase.auth.verifyOtp({ email, token: code.trim(), type: 'email' }); if (result.error || !result.data.user) setMessage(result.error?.message ?? 'Não foi possível criar a sessão.'); else { const { data } = await supabase.from('perfis').select('papel').eq('user_id', result.data.user.id).maybeSingle(); if (data?.papel !== 'admin') { await supabase.auth.signOut(); setMessage('Este e-mail não possui autorização administrativa.'); } else setMessage('Acesso administrativo confirmado.'); } setLoading(false) }
-  return <main className="admin-page"><button onClick={onBack}>← Voltar ao mapa</button><h1>Área administrativa</h1><p>Acesso sem senha. Receba um código de uso único no e-mail autorizado.</p>{!sent ? <form onSubmit={enviarCodigo}><label>E-mail administrativo<input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" /></label><button className="primary-action" disabled={loading}>{loading ? 'Enviando…' : 'Enviar código'}</button></form> : <form onSubmit={confirmarCodigo}><label>Código recebido por e-mail<input inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} required autoComplete="one-time-code" /></label><button className="primary-action" disabled={loading}>{loading ? 'Validando…' : 'Confirmar acesso'}</button><button type="button" onClick={() => { setSent(false); setCode(''); setMessage('') }}>Trocar e-mail</button></form>}{message && <p role="alert">{message}</p>}</main>
+  const client = supabase
+  const [email, setEmail] = useState('')
+  const [message, setMessage] = useState('')
+  const [loadingMessage, setLoadingMessage] = useState<string | null>('Verificando sessão…')
+  const [autorizado, setAutorizado] = useState(false)
+  const [linkEnviado, setLinkEnviado] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    const verificarSessao = async () => {
+      if (!client) {
+        setMessage('O acesso administrativo não está configurado. Verifique a configuração do Supabase.')
+        setLoadingMessage(null)
+        return
+      }
+
+      const erroLink = mensagemDeErroMagicLink()
+      if (erroLink && active) {
+        setMessage(erroLink)
+        setLinkEnviado(false)
+      }
+
+      setLoadingMessage('Verificando sessão…')
+      try {
+        const { data, error } = await client.auth.getSession()
+        if (error) {
+          if (active) setMessage(erroLink ?? 'Não foi possível verificar a sessão. Tente novamente.')
+          return
+        }
+        if (!data.session?.user) {
+          if (active && erroLink) {
+            setLinkEnviado(false)
+          }
+          return
+        }
+
+        const resultado = await validarPerfilAdmin(client, data.session.user.id)
+        if (active) {
+          setAutorizado(resultado.autorizado)
+          setMessage(resultado.autorizado ? 'Sessão administrativa validada.' : resultado.mensagem)
+        }
+      } catch {
+        if (active) setMessage(erroLink ?? 'Não foi possível verificar a sessão. Tente novamente.')
+      } finally {
+        if (active) setLoadingMessage(null)
+      }
+    }
+
+    void verificarSessao()
+    return () => {
+      active = false
+    }
+  }, [client])
+
+  const enviarLinkMagico = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!client || loadingMessage) return
+    setLoadingMessage('Enviando link de acesso…')
+    setMessage('')
+    try {
+      const emailRedirectTo = new URL('admin', `${window.location.origin}${import.meta.env.BASE_URL}`).toString()
+      const { error } = await client.auth.signInWithOtp({
+        email: email.trim(),
+        options: { shouldCreateUser: false, emailRedirectTo },
+      })
+      if (error) {
+        setMessage('Não foi possível enviar o link. Confira o e-mail e tente novamente; se persistir, verifique as URLs permitidas no Supabase.')
+        return
+      }
+      setLinkEnviado(true)
+      setMessage('Link enviado. Abra-o no e-mail para concluir o acesso; você retornará a esta página.')
+    } catch {
+      setMessage('Não foi possível enviar o link. Verifique sua conexão e tente novamente.')
+    } finally {
+      setLoadingMessage(null)
+    }
+  }
+
+  const sair = async () => {
+    if (!client || loadingMessage) return
+    setLoadingMessage('Encerrando sessão…')
+    setMessage('')
+    try {
+      const { error } = await client.auth.signOut({ scope: 'local' })
+      if (error) {
+        setMessage('Não foi possível encerrar a sessão. Tente novamente.')
+        return
+      }
+      setAutorizado(false)
+      setMessage('Sessão encerrada.')
+    } catch {
+      setMessage('Não foi possível encerrar a sessão. Tente novamente.')
+    } finally {
+      setLoadingMessage(null)
+    }
+  }
+
+  return (
+    <main className="admin-page">
+      <button onClick={onBack}>← Voltar ao mapa</button>
+      <h1>Área administrativa</h1>
+      {loadingMessage && <p role="status">{loadingMessage}</p>}
+      {!loadingMessage && autorizado ? (
+        <section>
+          <p>A autenticação foi confirmada. As operações de criação, edição e arquivamento de quadras ainda não estão conectadas ao banco.</p>
+          <button className="primary-action" onClick={() => void sair()} disabled={Boolean(loadingMessage) || !client}>Encerrar sessão</button>
+        </section>
+      ) : !loadingMessage && (
+        linkEnviado ? (
+          <section>
+            <p>Se o e-mail corresponder a uma conta existente, você receberá um link mágico. Abra-o para retornar a esta página e concluir a verificação administrativa.</p>
+            <button type="button" onClick={() => { setLinkEnviado(false); setMessage('') }}>Usar outro e-mail</button>
+          </section>
+        ) : (
+          <form onSubmit={(event) => void enviarLinkMagico(event)}>
+            <p>Informe o e-mail da conta administrativa existente. Um link mágico será enviado para autenticação.</p>
+            <label>
+              E-mail administrativo
+              <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required autoComplete="email" disabled={Boolean(loadingMessage) || !client} />
+            </label>
+            <button className="primary-action" type="submit" disabled={Boolean(loadingMessage) || !client}>Enviar link mágico</button>
+          </form>
+        )
+      )}
+      {message && <p role="alert">{message}</p>}
+    </main>
+  )
 }
 
 const BASE_PATH = import.meta.env.BASE_URL.replace(/\/$/, '')
