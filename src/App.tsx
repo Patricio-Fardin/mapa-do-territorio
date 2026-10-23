@@ -78,6 +78,39 @@ function mensagemDeErroMagicLink(): string | null {
   return null
 }
 
+function mensagemErroEnvioLink(error: unknown): string {
+  if (!error || typeof error !== 'object') {
+    return 'Não foi possível contatar o serviço de autenticação. Verifique sua conexão e tente novamente.'
+  }
+
+  const details = error as { code?: unknown; status?: unknown; message?: unknown }
+  const code = typeof details.code === 'string' ? details.code.toLowerCase() : ''
+  const message = typeof details.message === 'string' ? details.message.toLowerCase() : ''
+  const status = typeof details.status === 'number' ? details.status : 0
+
+  if (status === 429 || code.includes('rate_limit') || code.includes('too_many_requests')) {
+    return 'O limite de envio foi atingido. Aguarde alguns minutos antes de solicitar outro link.'
+  }
+
+  if (code.includes('redirect') || message.includes('redirect') && (message.includes('allow') || message.includes('url'))) {
+    return 'O endereço de retorno não está permitido no Supabase Auth. Confira a URL de produção em Additional Redirect URLs.'
+  }
+
+  if (code.includes('email_address_invalid') || code.includes('email_invalid')) {
+    return 'O formato do e-mail não foi aceito. Confira o endereço e tente novamente.'
+  }
+
+  if (code.includes('email_provider_disabled') || code.includes('otp_disabled')) {
+    return 'O login por e-mail está desativado no Supabase Auth. Confira a configuração do provedor de e-mail.'
+  }
+
+  if (status >= 500 || message.includes('smtp') || message.includes('mail')) {
+    return 'O serviço de e-mail do Supabase não conseguiu enviar a mensagem. Confira a configuração de entrega de e-mails e tente novamente mais tarde.'
+  }
+
+  return 'Não foi possível enviar o link. Confira sua conexão e tente novamente. Se persistir, verifique os logs de Auth, a entrega de e-mails e as URLs permitidas no Supabase.'
+}
+
 function AdminPage({ onBack }: { onBack: () => void }) {
   const client = supabase
   const [email, setEmail] = useState('')
@@ -145,13 +178,13 @@ function AdminPage({ onBack }: { onBack: () => void }) {
         options: { shouldCreateUser: false, emailRedirectTo },
       })
       if (error) {
-        setMessage('Não foi possível enviar o link. Confira o e-mail e tente novamente; se persistir, verifique as URLs permitidas no Supabase.')
+        setMessage(mensagemErroEnvioLink(error))
         return
       }
       setLinkEnviado(true)
       setMessage('Link enviado. Abra-o no e-mail para concluir o acesso; você retornará a esta página.')
-    } catch {
-      setMessage('Não foi possível enviar o link. Verifique sua conexão e tente novamente.')
+    } catch (error) {
+      setMessage(mensagemErroEnvioLink(error))
     } finally {
       setLoadingMessage(null)
     }
