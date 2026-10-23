@@ -4,14 +4,14 @@ Sistema web para acompanhar quadras territoriais na cidade de Alfredo Chaves, Es
 
 ## Estado atual
 
-O projeto mantém desenvolvimento local e publicação no GitHub Pages. A aplicação abre um mapa OpenStreetMap centrado em Alfredo Chaves; as operações administrativas persistentes para criar, editar e arquivar quadras ainda não estão conectadas à interface.
+O projeto mantém desenvolvimento local e publicação no GitHub Pages. A aplicação abre um mapa OpenStreetMap centrado em Alfredo Chaves e oferece uma área administrativa para criar, editar e arquivar quadras com persistência no Supabase.
 
 Funcionalidades atuais:
 
 - React + TypeScript + Vite.
 - Leaflet, React-Leaflet e Leaflet Draw.
 - Mapa OpenStreetMap com zoom.
-- A autenticação administrativa é verificada pelo perfil no Supabase; as operações administrativas de quadras ainda não estão conectadas à interface.
+- A autenticação administrativa é verificada pelo perfil no Supabase; usuários autorizados podem criar, editar geometrias e arquivar quadras na área `/admin`.
 - Códigos automáticos no formato `AC-001`, `AC-002` etc.
 - Menu Leaflet ancorado à quadra com três ações:
   - Concluída — verde `#27ae60`.
@@ -30,11 +30,12 @@ Quando o Supabase estiver configurado e as migrations aplicadas:
 - Visitantes podem ler quadras ativas e alterar a situação pela operação colaborativa autorizada no banco.
 - `/admin` autentica com nome de usuário e senha por `signInWithPassword`; o login não envia e-mail, link mágico ou código OTP.
 - A opção **Esqueci minha senha** solicita um link de recuperação pelo Supabase Auth. Ao retornar, a aplicação valida a sessão e confirma o e-mail e o perfil `public.perfis.papel = 'admin'` antes de permitir a troca da senha.
+- Depois do login, a área administrativa permite desenhar novas quadras, editar geometrias existentes e arquivar quadras. As alterações estruturais são feitas somente pelas RPCs administrativas do banco; o mapa público continua sem ferramentas de desenho/arquivamento.
 - O nome de usuário é um alias configurado no frontend. `VITE_ADMIN_LOGIN_EMAIL` mapeia esse alias para o e-mail da conta Auth administrativa existente e fica visível no bundle; não é um segredo.
 - A conta Auth administrativa existente deve continuar associada ao perfil atual. O frontend não oferece cadastro nem cria outra conta.
 - O acesso administrativo só é concedido quando a consulta a `public.perfis` confirma `papel = 'admin'` para o usuário autenticado. Falha na consulta ou papel diferente encerra a sessão.
 - A UI não é a proteção principal: as políticas RLS e a função SQL validam as operações no banco.
-- A autenticação, por si só, não habilita criação, edição ou arquivamento de quadras na interface.
+- A autorização da interface é revalidada antes de cada operação administrativa; as RPCs e políticas do banco continuam sendo a autoridade final.
 
 Configure `VITE_ADMIN_USERNAME` (opcional; padrão `admin`) e `VITE_ADMIN_LOGIN_EMAIL` (obrigatório) junto às variáveis Supabase em **Settings → Secrets and variables → Actions → Variables** do repositório. Use o e-mail da conta Auth que já corresponde ao perfil com `papel = 'admin'`. Essas variáveis de frontend são públicas; não cadastre senhas ou chaves privilegiadas nelas.
 
@@ -61,7 +62,7 @@ O utilitário exige um UUID como argumento, solicita a senha duas vezes sem eco�
 
 - Sem Supabase configurado, os dados locais temporários não persistem após recarregar a página.
 - O mapa público usa o cliente Supabase para carregar quadras e persistir mudanças de situação quando configurado; a configuração e as migrations do projeto remoto precisam ser verificadas separadamente.
-- A interface administrativa ainda não chama as RPCs `admin_criar_quadra`, `admin_atualizar_geometria` e `admin_arquivar_quadra`. Desenho, edição e arquivamento não estão disponíveis como operações persistentes.
+- A criação, edição de geometria e arquivamento usam, respectivamente, `admin_criar_quadra`, `admin_atualizar_geometria` e `admin_arquivar_quadra`; operações administrativas dependem da configuração e autorização do projeto Supabase.
 - A sincronização Realtime depende de habilitar a tabela no projeto Supabase.
 - Arquivamento é uma operação reversível lógica (`ativa=false`) que preserva a quadra e seu histórico. Exclusão física não é permitida pela interface pública e não deve ser usada como rotina administrativa.
 - Ainda não há importação/exportação de backup JSON.
@@ -87,7 +88,7 @@ npm.cmd install
 npm.cmd run dev
 ```
 
-Abra `http://localhost:5173/` no navegador.
+Abra `http://localhost:5173/mapa-do-territorio/` no navegador. A área administrativa está em `http://localhost:5173/mapa-do-territorio/admin`.
 
 O uso de `npm.cmd` evita o bloqueio do PowerShell ao arquivo `npm.ps1`.
 
@@ -115,9 +116,8 @@ O build foi verificado com sucesso em 22/10/2026.
 2. Executar as migrations em `supabase/migrations/` na ordem numérica, se ainda não aplicadas pelo proprietário.
 3. Habilitar Realtime para as tabelas necessárias.
 4. Validar RLS e operações públicas e administrativas.
-5. Persistir completamente criação, edição e arquivamento administrativos.
-6. Implementar backup JSON.
-7. Criar testes locais e em dois dispositivos.
+5. Implementar backup JSON.
+6. Criar testes locais e em dois dispositivos.
 
 ## Cuidados com os dados
 
