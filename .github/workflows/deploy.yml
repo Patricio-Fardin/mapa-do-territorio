@@ -32,6 +32,8 @@ jobs:
         env:
           VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+          VITE_ADMIN_USERNAME: ${{ vars.VITE_ADMIN_USERNAME }}
+          VITE_ADMIN_LOGIN_EMAIL: ${{ vars.VITE_ADMIN_LOGIN_EMAIL }}
       - name: Configure Pages
         uses: actions/configure-pages@v5
       - name: Upload artifact

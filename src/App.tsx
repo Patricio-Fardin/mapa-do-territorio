@@ -27,7 +27,11 @@ function PersistedLayers({ quadras, onSelect, layers }: { quadras: Quadra[]; onS
 
 type ResultadoAutorizacao = { autorizado: true } | { autorizado: false; mensagem: string }
 
-async function encerrarSessao(client: NonNullable<typeof supabase>, mensagem: string): Promise<ResultadoAutorizacao> {
+function mensagemAutorizacao(resultado: ResultadoAutorizacao): string {
+  return 'mensagem' in resultado ? resultado.mensagem : 'Sessão administrativa validada.'
+}
+
+async function encerrarSessao(client: NonNullable<typeof supabase>, mensagem: string): Promise<{ autorizado: false; mensagem: string }> {
   try {
     const { error } = await client.auth.signOut({ scope: 'local' })
     if (error) {
@@ -54,107 +58,47 @@ async function validarPerfilAdmin(client: NonNullable<typeof supabase>, userId: 
   }
 }
 
-function mensagemDeErroMagicLink(): string | null {
-  const hash = window.location.hash.replace(/^#/, '')
-  if (!hash) return null
-
-  const params = new URLSearchParams(hash)
-  const errorCode = params.get('error_code')
-  const error = params.get('error')
-  const description = params.get('error_description')
-
-  if (errorCode === 'otp_expired' || error === 'otp_expired') {
-    return 'O link de acesso expirou ou já foi usado. Solicite um novo link e tente novamente.'
-  }
-
-  if (errorCode === 'access_denied' || error === 'access_denied') {
-    return 'O link de acesso não pôde ser concluído. Solicite um novo link com uma conta administrativa autorizada.'
-  }
-
-  if (errorCode || error || description) {
-    return 'O link de acesso não pôde ser concluído. Solicite um novo link e tente novamente.'
-  }
-
-  return null
-}
-
-function mensagemErroEnvioLink(error: unknown): string {
-  if (!error || typeof error !== 'object') {
-    return 'Não foi possível contatar o serviço de autenticação. Verifique sua conexão e tente novamente.'
-  }
-
-  const details = error as { code?: unknown; status?: unknown; message?: unknown }
-  const code = typeof details.code === 'string' ? details.code.toLowerCase() : ''
-  const message = typeof details.message === 'string' ? details.message.toLowerCase() : ''
-  const status = typeof details.status === 'number' ? details.status : 0
-
-  if (status === 429 || code.includes('rate_limit') || code.includes('too_many_requests')) {
-    return 'O limite de envio foi atingido. Aguarde alguns minutos antes de solicitar outro link.'
-  }
-
-  if (code.includes('redirect') || message.includes('redirect') && (message.includes('allow') || message.includes('url'))) {
-    return 'O endereço de retorno não está permitido no Supabase Auth. Confira a URL de produção em Additional Redirect URLs.'
-  }
-
-  if (code.includes('email_address_invalid') || code.includes('email_invalid')) {
-    return 'O formato do e-mail não foi aceito. Confira o endereço e tente novamente.'
-  }
-
-  if (code.includes('email_provider_disabled') || code.includes('otp_disabled')) {
-    return 'O login por e-mail está desativado no Supabase Auth. Confira a configuração do provedor de e-mail.'
-  }
-
-  if (status >= 500 || message.includes('smtp') || message.includes('mail')) {
-    return 'O serviço de e-mail do Supabase não conseguiu enviar a mensagem. Confira a configuração de entrega de e-mails e tente novamente mais tarde.'
-  }
-
-  return 'Não foi possível enviar o link. Confira sua conexão e tente novamente. Se persistir, verifique os logs de Auth, a entrega de e-mails e as URLs permitidas no Supabase.'
-}
-
 function AdminPage({ onBack }: { onBack: () => void }) {
   const client = supabase
-  const [email, setEmail] = useState('')
+  const adminUsername = import.meta.env.VITE_ADMIN_USERNAME?.trim() || 'admin'
+  const adminLoginEmail = import.meta.env.VITE_ADMIN_LOGIN_EMAIL?.trim() || ''
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [message, setMessage] = useState('')
   const [loadingMessage, setLoadingMessage] = useState<string | null>('Verificando sessão…')
   const [autorizado, setAutorizado] = useState(false)
-  const [linkEnviado, setLinkEnviado] = useState(false)
+  const submitting = useRef(false)
+  const configurationIncomplete = !client || !adminLoginEmail
 
   useEffect(() => {
     let active = true
     const verificarSessao = async () => {
-      if (!client) {
-        setMessage('O acesso administrativo não está configurado. Verifique a configuração do Supabase.')
+      if (!client || !adminLoginEmail) {
+        setMessage('A configuração administrativa está incompleta. Verifique as variáveis do Supabase e do login admin.')
         setLoadingMessage(null)
         return
       }
 
-      const erroLink = mensagemDeErroMagicLink()
-      if (erroLink && active) {
-        setMessage(erroLink)
-        setLinkEnviado(false)
-      }
-
-      setLoadingMessage('Verificando sessão…')
       try {
         const { data, error } = await client.auth.getSession()
         if (error) {
-          if (active) setMessage(erroLink ?? 'Não foi possível verificar a sessão. Tente novamente.')
+          const resultado = await encerrarSessao(client, 'Não foi possível verificar a sessão.')
+          if (active) setMessage(resultado.mensagem)
           return
         }
         if (!data.session?.user) {
-          if (active && erroLink) {
-            setLinkEnviado(false)
-          }
           return
         }
 
         const resultado = await validarPerfilAdmin(client, data.session.user.id)
         if (active) {
           setAutorizado(resultado.autorizado)
-          setMessage(resultado.autorizado ? 'Sessão administrativa validada.' : resultado.mensagem)
+          setMessage(mensagemAutorizacao(resultado))
         }
       } catch {
-        if (active) setMessage(erroLink ?? 'Não foi possível verificar a sessão. Tente novamente.')
+        const resultado = await encerrarSessao(client, 'Não foi possível verificar a sessão.')
+        if (active) setMessage(resultado.mensagem)
       } finally {
         if (active) setLoadingMessage(null)
       }
@@ -164,34 +108,48 @@ function AdminPage({ onBack }: { onBack: () => void }) {
     return () => {
       active = false
     }
-  }, [client])
+  }, [client, adminLoginEmail])
 
-  const enviarLinkMagico = async (event: React.FormEvent) => {
+  const entrar = async (event: React.FormEvent) => {
     event.preventDefault()
-    if (!client || loadingMessage) return
-    setLoadingMessage('Enviando link de acesso…')
+    if (!client || configurationIncomplete || loadingMessage || submitting.current) return
+    submitting.current = true
+    setLoadingMessage('Validando acesso…')
     setMessage('')
     try {
-      const emailRedirectTo = new URL('admin', `${window.location.origin}${import.meta.env.BASE_URL}`).toString()
-      const { error } = await client.auth.signInWithOtp({
-        email: email.trim(),
-        options: { shouldCreateUser: false, emailRedirectTo },
-      })
-      if (error) {
-        setMessage(mensagemErroEnvioLink(error))
+      if (username.trim().toLocaleLowerCase() !== adminUsername.toLocaleLowerCase()) {
+        setMessage('Usuário ou senha inválidos.')
         return
       }
-      setLinkEnviado(true)
-      setMessage('Link enviado. Abra-o no e-mail para concluir o acesso; você retornará a esta página.')
-    } catch (error) {
-      setMessage(mensagemErroEnvioLink(error))
+      const { data, error } = await client.auth.signInWithPassword({
+        email: adminLoginEmail,
+        password,
+      })
+      if (error) {
+        setMessage('Usuário ou senha inválidos.')
+        return
+      }
+      if (!data.user) {
+        const resultado = await encerrarSessao(client, 'Não foi possível concluir o acesso.')
+        setMessage(resultado.mensagem)
+        return
+      }
+      const resultado = await validarPerfilAdmin(client, data.user.id)
+      setAutorizado(resultado.autorizado)
+      setMessage(mensagemAutorizacao(resultado))
+    } catch {
+      const resultado = await encerrarSessao(client, 'Não foi possível concluir o acesso.')
+      setMessage(resultado.mensagem)
     } finally {
+      setPassword('')
+      submitting.current = false
       setLoadingMessage(null)
     }
   }
 
   const sair = async () => {
-    if (!client || loadingMessage) return
+    if (!client || loadingMessage || submitting.current) return
+    submitting.current = true
     setLoadingMessage('Encerrando sessão…')
     setMessage('')
     try {
@@ -205,6 +163,7 @@ function AdminPage({ onBack }: { onBack: () => void }) {
     } catch {
       setMessage('Não foi possível encerrar a sessão. Tente novamente.')
     } finally {
+      submitting.current = false
       setLoadingMessage(null)
     }
   }
@@ -220,21 +179,21 @@ function AdminPage({ onBack }: { onBack: () => void }) {
           <button className="primary-action" onClick={() => void sair()} disabled={Boolean(loadingMessage) || !client}>Encerrar sessão</button>
         </section>
       ) : !loadingMessage && (
-        linkEnviado ? (
-          <section>
-            <p>Se o e-mail corresponder a uma conta existente, você receberá um link mágico. Abra-o para retornar a esta página e concluir a verificação administrativa.</p>
-            <button type="button" onClick={() => { setLinkEnviado(false); setMessage('') }}>Usar outro e-mail</button>
-          </section>
-        ) : (
-          <form onSubmit={(event) => void enviarLinkMagico(event)}>
-            <p>Informe o e-mail da conta administrativa existente. Um link mágico será enviado para autenticação.</p>
-            <label>
-              E-mail administrativo
-              <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required autoComplete="email" disabled={Boolean(loadingMessage) || !client} />
-            </label>
-            <button className="primary-action" type="submit" disabled={Boolean(loadingMessage) || !client}>Enviar link mágico</button>
-          </form>
-        )
+        <form onSubmit={(event) => void entrar(event)}>
+          <p>Entre com o nome de usuário e a senha da conta administrativa existente.</p>
+          <label>
+            Nome de usuário
+            <input type="text" value={username} onChange={(event) => setUsername(event.target.value)} required autoComplete="username" disabled={Boolean(loadingMessage) || configurationIncomplete} />
+          </label>
+          <label>
+            Senha
+            <input type={showPassword ? 'text' : 'password'} value={password} onChange={(event) => setPassword(event.target.value)} required autoComplete="current-password" disabled={Boolean(loadingMessage) || configurationIncomplete} />
+          </label>
+          <button type="button" onClick={() => setShowPassword((visible) => !visible)} disabled={Boolean(loadingMessage) || configurationIncomplete}>
+            {showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+          </button>
+          <button className="primary-action" type="submit" disabled={Boolean(loadingMessage) || configurationIncomplete}>Entrar</button>
+        </form>
       )}
       {message && <p role="alert">{message}</p>}
     </main>

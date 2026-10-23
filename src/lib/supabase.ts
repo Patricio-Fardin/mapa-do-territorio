@@ -7,6 +7,6 @@ export const supabaseConfigured = Boolean(url && publishableKey)
 
 export const supabase = supabaseConfigured
   ? createClient(url, publishableKey, {
-      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
     })
   : null

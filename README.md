@@ -28,26 +28,29 @@ Quando o Supabase estiver configurado e as migrations aplicadas:
 
 - `/` é o mapa público e não exige cadastro ou login.
 - Visitantes podem ler quadras ativas e alterar a situação pela operação colaborativa autorizada no banco.
-- `/admin` envia um link mágico por e-mail via Supabase Auth; ao retornar, uma sessão existente é validada novamente.
-- A conta administrativa deve existir previamente no Supabase. O frontend não oferece cadastro e envia o link com `shouldCreateUser: false`.
+- `/admin` autentica com nome de usuário e senha por `signInWithPassword`; o login não envia e-mail, link mágico ou código OTP.
+- O nome de usuário é um alias configurado no frontend. `VITE_ADMIN_LOGIN_EMAIL` mapeia esse alias para o e-mail da conta Auth administrativa existente e fica visível no bundle; não é um segredo.
+- A conta Auth administrativa existente deve continuar associada ao perfil atual. O frontend não oferece cadastro nem cria outra conta.
 - O acesso administrativo só é concedido quando a consulta a `public.perfis` confirma `papel = 'admin'` para o usuário autenticado. Falha na consulta ou papel diferente encerra a sessão.
 - A UI não é a proteção principal: as políticas RLS e a função SQL validam as operações no banco.
 - A autenticação, por si só, não habilita criação, edição ou arquivamento de quadras na interface.
 
-Na configuração do Supabase Auth, defina o Site URL como `https://patricio-fardin.github.io/mapa-do-territorio/` e inclua `https://patricio-fardin.github.io/mapa-do-territorio/**` em Additional Redirect URLs. No template Magic Link, use `{{ .ConfirmationURL }}` sem URL `localhost` fixa. Para desenvolvimento, pode-se permitir `http://localhost:5173/**`.
+Configure `VITE_ADMIN_USERNAME` (opcional; padrão `admin`) e `VITE_ADMIN_LOGIN_EMAIL` (obrigatório) junto às variáveis Supabase em **Settings → Secrets and variables → Actions → Variables** do repositório. Use o e-mail da conta Auth que já corresponde ao perfil com `papel = 'admin'`. Essas variáveis de frontend são públicas; não cadastre senhas ou chaves privilegiadas nelas.
 
-Para criar o primeiro administrador, crie manualmente um usuário em Supabase Dashboard → Authentication → Users. Depois, no SQL Editor, insira o ID desse usuário na tabela de perfis:
+Para desenvolvimento local, copie `.env.example` para `.env.local` e preencha as variáveis `VITE_*` sem usar credenciais privilegiadas. `.env.local` é ignorado pelo Git.
 
-```sql
-insert into public.perfis (user_id, papel)
-values ('UUID_DO_USUARIO_CRIADO_NO_AUTH', 'admin');
+### Definir senha da conta Auth existente
+
+O login por senha não define uma senha automaticamente. Se a conta Auth existente ainda não tiver senha, o proprietário pode executar uma única vez o utilitário local abaixo, apontando explicitamente para o UUID desse usuário:
+
+```powershell
+# Configure estas variáveis no ambiente local seguro, sem gravá-las no repositório.
+$env:SUPABASE_URL = "<URL do projeto Supabase>"
+$env:SUPABASE_SERVICE_ROLE_KEY = "<chave administrativa secreta>"
+npm.cmd run admin:set-password -- <UUID_DO_USUARIO_AUTH_EXISTENTE>
 ```
 
-Procedimento seguro: execute esse `insert` somente no SQL Editor usando uma sessão de proprietário/administrador do projeto, nunca pelo frontend. A tabela `public.perfis` não concede escrita a `anon` nem a usuários autenticados comuns. Confirme o resultado com `select user_id, papel from public.perfis where papel = 'admin';` e não coloque o UUID, senha ou chaves secretas em arquivos públicos.
-
-Na configuração do Supabase Auth, desative a criação de novos usuários quando o projeto estiver pronto. O administrador deve ser criado previamente no painel e possuir o perfil autorizado no banco.
-
-Nunca coloque senhas, `service_role` ou chaves secretas no código ou em variáveis `VITE_*`.
+O utilitário exige um UUID como argumento, solicita a senha duas vezes sem ecoá-la, não imprime credenciais e atualiza somente esse usuário pelo Admin API. Não o execute sem autorização explícita do proprietário; nunca use essa chave em `VITE_*`, no frontend ou no Git. A conta e o registro de `public.perfis` não são criados, substituídos ou alterados por esse procedimento.
 
 ## Limitações atuais
 
@@ -83,6 +86,8 @@ Abra `http://localhost:5173/` no navegador.
 
 O uso de `npm.cmd` evita o bloqueio do PowerShell ao arquivo `npm.ps1`.
 
+Para testar `/admin` localmente, configure também `VITE_ADMIN_USERNAME` e `VITE_ADMIN_LOGIN_EMAIL` em `.env.local`.
+
 ## Verificação de produção
 
 ```powershell
@@ -101,15 +106,13 @@ O build foi verificado com sucesso em 22/10/2026.
 
 ## Próximas etapas
 
-1. Confirmar a configuração do projeto Supabase e das URLs de redirecionamento do Auth.
-2. Executar as migrations em `supabase/migrations/` na ordem numérica.
-3. Criar o primeiro usuário administrador e inserir seu papel.
-4. Habilitar Realtime para as tabelas necessárias.
-5. Validar RLS e operações públicas e administrativas.
-6. Persistir completamente criação, edição e arquivamento administrativos.
+1. Confirmar as variáveis de build do GitHub Actions, inclusive o alias e o e-mail da conta Auth existente.
+2. Executar as migrations em `supabase/migrations/` na ordem numérica, se ainda não aplicadas pelo proprietário.
+3. Habilitar Realtime para as tabelas necessárias.
+4. Validar RLS e operações públicas e administrativas.
+5. Persistir completamente criação, edição e arquivamento administrativos.
 6. Implementar backup JSON.
 7. Criar testes locais e em dois dispositivos.
-8. Validar o retorno do link mágico no GitHub Pages após configurar as URLs permitidas no Supabase Auth.
 
 ## Cuidados com os dados
 
