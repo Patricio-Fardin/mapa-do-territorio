@@ -3,12 +3,17 @@ import { MapContainer, TileLayer, ZoomControl, useMap } from 'react-leaflet'
 import L, { type Layer } from 'leaflet'
 import AdminMap from './components/AdminMap'
 import { supabase } from './lib/supabase'
+import {
+  FormatoSituacaoQuadraInvalido,
+  normalizarSituacaoQuadra,
+  type SituacaoQuadra,
+} from './lib/quadra-status'
 import 'leaflet/dist/leaflet.css'
 import 'leaflet-draw/dist/leaflet.draw.css'
 import 'leaflet-draw'
 import './App.css'
 
-type Situacao = 'pendente' | 'concluida' | 'refazer'
+type Situacao = SituacaoQuadra
 type Quadra = { id: string; codigo: string; situacao: Situacao; geometria?: GeoJSON.Geometry }
 const CORES: Record<Situacao, string> = { pendente: '#78858a', concluida: '#27ae60', refazer: '#e67e22' }
 const NOMES: Record<Situacao, string> = { pendente: 'Pendente', concluida: 'Concluída', refazer: 'Refazer' }
@@ -31,10 +36,23 @@ async function lerQuadrasPublicas(client: NonNullable<typeof supabase>): Promise
       id: row.id,
       codigo: row.codigo,
       geometria: row.geometria,
-      situacao: row.situacoes_quadras?.[0]?.situacao ?? 'pendente',
+      situacao: normalizarSituacaoQuadra(row.situacoes_quadras),
     })))
     if ((data?.length ?? 0) < pageSize) return quadras
   }
+}
+
+function mensagemErroLeituraPublica(error: unknown): string {
+  return error instanceof FormatoSituacaoQuadraInvalido
+    ? 'O banco retornou um formato de situação inválido. Nenhuma situação foi presumida.'
+    : 'Não foi possível atualizar as quadras. Verifique a conexão e tente novamente.'
+}
+
+function situacaoDaRespostaRpc(data: unknown): Situacao {
+  if (data === null || typeof data !== 'object' || !('situacao' in data)) {
+    throw new FormatoSituacaoQuadraInvalido()
+  }
+  return normalizarSituacaoQuadra(data.situacao)
 }
 
 function PersistedLayers({ quadras, onSelect, layers }: { quadras: Quadra[]; onSelect: (id: string) => void; layers: React.MutableRefObject<Map<string, L.Layer[]>> }) {
@@ -535,9 +553,9 @@ function MapPage() {
       if (version !== loadVersion.current) return
       setQuadras(result)
       setMessage('')
-    } catch {
+    } catch (error: unknown) {
       if (version === loadVersion.current) {
-        setMessage('Não foi possível atualizar as quadras. Tente novamente.')
+        setMessage(mensagemErroLeituraPublica(error))
       }
     }
   }, [client])
@@ -553,9 +571,9 @@ function MapPage() {
           setMessage('')
         }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (active && version === loadVersion.current) {
-          setMessage('Não foi possível atualizar as quadras. Tente novamente.')
+          setMessage(mensagemErroLeituraPublica(error))
         }
       })
     const channel = client
@@ -589,21 +607,41 @@ function MapPage() {
     setMessage('')
     try {
       if (client) {
-        const { error } = await client.rpc('atualizar_situacao_quadra', {
+        const { data, error } = await client.rpc('atualizar_situacao_quadra', {
           p_quadra_id: atual.id,
           p_situacao: situacao,
           p_observacao: null,
         })
         if (error) {
-          setMessage('Não foi possível salvar a situação. A quadra não foi alterada.')
+          const safeCode = /^[0-9A-Z]{5}$/.test(error.code ?? '') ? ` Código: ${error.code}.` : ''
+          await carregarQuadras()
+          setMessage(`O Supabase recusou a atualização da situação.${safeCode}`)
           return
         }
+        const situacaoConfirmada = situacaoDaRespostaRpc(data)
+        if (situacaoConfirmada !== situacao) {
+          await carregarQuadras()
+          setMessage('A resposta do Supabase não confirmou a situação solicitada. A situação foi recarregada.')
+          return
+        }
+        setQuadras((items) => items.map((quadra) => quadra.id === atual.id
+          ? { ...quadra, situacao: situacaoConfirmada }
+          : quadra))
+        setSelected(null)
+        void carregarQuadras()
+        return
       }
       setQuadras((items) => items.map((quadra) => quadra.id === atual.id ? { ...quadra, situacao } : quadra))
       layers.current.get(atual.id)?.forEach((layer) => aplicarEstilo(layer, situacao))
       setSelected(null)
-    } catch {
-      setMessage('Não foi possível salvar a situação. A quadra não foi alterada.')
+    } catch (error: unknown) {
+      if (error instanceof FormatoSituacaoQuadraInvalido) {
+        await carregarQuadras()
+        setMessage('O Supabase não confirmou uma situação válida. A situação atual foi recarregada.')
+      } else {
+        await carregarQuadras()
+        setMessage('Não foi possível confirmar a alteração da situação. Verifique os dados atualizados.')
+      }
     } finally {
       statusLock.current = false
       setSavingStatus(false)

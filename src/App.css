@@ -33,6 +33,7 @@ button:hover { border-color: #287f73; }
 .admin-map-actions p { margin: 0; color: #60757a; font-size: .85rem; }
 .admin-map-card { margin: 0; }
 .admin-map-card .map { height: min(58vh, 640px); min-height: 360px; }
+.admin-map-busy .leaflet-draw-toolbar { pointer-events: none; opacity: .5; }
 .sheet { position: fixed; z-index: 1000; right: 1rem; bottom: 1rem; width: min(360px, calc(100% - 2rem)); max-height: 72vh; overflow: auto; padding: 1rem; border: 1px solid #cbdcde; border-radius: .8rem; background: #fff; box-shadow: 0 8px 28px #19323833; }
 .sheet h2 { margin: 0; color: #173d43; }.sheet h3 { margin-bottom: .35rem; font-size: 1rem; }.sheet p { color: #60757a; font-size: .78rem; }.sheet label { display: block; margin-top: .75rem; font-size: .85rem; font-weight: 700; }.sheet select, .sheet textarea { display: block; width: 100%; margin-top: .3rem; padding: .6rem; border: 1px solid #c8d7d9; border-radius: .45rem; font: inherit; }.sheet textarea { min-height: 70px; resize: vertical; }.sheet ul { padding-left: 1.1rem; color: #60757a; font-size: .78rem; }.close { position: absolute; top: .5rem; right: .5rem; border: 0; font-size: 1.4rem; padding: .1rem .4rem; }
 @media (max-width: 760px) { .admin-map-toolbar { grid-template-columns: 1fr; } .admin-status { grid-template-columns: repeat(2, 1fr); } .admin-map-card .map { min-height: 430px; } }

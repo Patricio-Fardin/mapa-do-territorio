@@ -3,8 +3,13 @@ import { MapContainer, TileLayer, ZoomControl, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import type { Geometry, MultiPolygon, Polygon } from 'geojson'
 import { supabase } from '../lib/supabase'
+import {
+  FormatoSituacaoQuadraInvalido,
+  normalizarSituacaoQuadra,
+  type SituacaoQuadra,
+} from '../lib/quadra-status'
 
-type Situacao = 'pendente' | 'concluida' | 'refazer'
+type Situacao = SituacaoQuadra
 type Quadra = { id: string; codigo: string; situacao: Situacao; geometria: Geometry }
 type GeometriaEditada = { id: string; geometria: Geometry }
 type RpcQuadra = { id?: string; codigo?: string; geometria?: Geometry }
@@ -18,17 +23,19 @@ function aplicarEstilo(layer: L.Layer, situacao: Situacao) {
   ;(layer as L.Path).setStyle({ color: CORES[situacao], fillColor: CORES[situacao], fillOpacity: .42, opacity: .95, weight: 2 })
 }
 
-function statusDaLinha(row: { situacoes_quadras?: { situacao?: Situacao }[] | null }): Situacao {
-  return row.situacoes_quadras?.[0]?.situacao ?? 'pendente'
-}
-
-function normalizarQuadras(rows: Array<{ id: string; codigo: string; geometria: Geometry; situacoes_quadras?: { situacao?: Situacao }[] | null }>): Quadra[] {
+function normalizarQuadras(rows: Array<{ id: string; codigo: string; geometria: Geometry; situacoes_quadras?: unknown }>): Quadra[] {
   return rows.map((row) => ({
     id: row.id,
     codigo: row.codigo,
     geometria: row.geometria,
-    situacao: statusDaLinha(row),
+    situacao: normalizarSituacaoQuadra(row.situacoes_quadras),
   }))
+}
+
+function mensagemErroLeitura(error: unknown): string {
+  return error instanceof FormatoSituacaoQuadraInvalido
+    ? 'O Supabase retornou uma situação de quadra inválida. A situação não foi presumida.'
+    : 'Não foi possível carregar as quadras. Verifique a conexão e tente novamente.'
 }
 
 async function lerQuadrasAtivas(): Promise<Quadra[]> {
@@ -96,6 +103,17 @@ function geometriaDaCamada(layer: L.Layer): Geometry {
   return (layer as L.Polygon).toGeoJSON().geometry as Geometry
 }
 
+function chaveGeometria(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(chaveGeometria).join(',')}]`
+  if (value !== null && typeof value === 'object') {
+    return `{${Object.entries(value)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${JSON.stringify(key)}:${chaveGeometria(item)}`)
+      .join(',')}}`
+  }
+  return JSON.stringify(value) ?? 'undefined'
+}
+
 function AdminDrawingMap({
   quadras,
   selectedId,
@@ -116,9 +134,18 @@ function AdminDrawingMap({
   const idsByLayer = useRef(new WeakMap<L.Layer, string>())
   const originalTypes = useRef(new Map<string, Geometry['type']>())
   const callbacks = useRef({ onSelect, onCreate, onGeometryEdit })
+  const busyRef = useRef(busy)
+  const interactionActive = useRef(false)
+  const pendingLayerSync = useRef(false)
+  const currentQuadras = useRef(quadras)
+  const syncLayers = useRef<() => void>(() => {})
   useLayoutEffect(() => {
     callbacks.current = { onSelect, onCreate, onGeometryEdit }
   }, [onSelect, onCreate, onGeometryEdit])
+  useLayoutEffect(() => {
+    busyRef.current = busy
+    currentQuadras.current = quadras
+  }, [busy, quadras])
 
   useEffect(() => {
     const group = L.featureGroup().addTo(map)
@@ -132,20 +159,30 @@ function AdminDrawingMap({
   useEffect(() => {
     const group = editableGroup.current
     if (!group) return
-    group.clearLayers()
-    idsByLayer.current = new WeakMap()
-    originalTypes.current.clear()
-    quadras.forEach((quadra) => {
-      originalTypes.current.set(quadra.id, quadra.geometria.type)
-      const feature = L.geoJSON(quadra.geometria as Geometry)
-      feature.eachLayer((part) => {
-        aplicarEstilo(part, quadra.situacao)
-        idsByLayer.current.set(part, quadra.id)
-        part.on('click', () => callbacks.current.onSelect(quadra.id))
-        group.addLayer(part)
+    const sync = () => {
+      group.clearLayers()
+      idsByLayer.current = new WeakMap()
+      originalTypes.current.clear()
+      currentQuadras.current.forEach((quadra) => {
+        originalTypes.current.set(quadra.id, quadra.geometria.type)
+        const feature = L.geoJSON(quadra.geometria as Geometry)
+        feature.eachLayer((part) => {
+          aplicarEstilo(part, quadra.situacao)
+          idsByLayer.current.set(part, quadra.id)
+          part.on('click', () => callbacks.current.onSelect(quadra.id))
+          group.addLayer(part)
+        })
       })
-    })
+      pendingLayerSync.current = false
+    }
+    syncLayers.current = sync
+    if (interactionActive.current || busyRef.current) pendingLayerSync.current = true
+    else sync()
   }, [quadras])
+
+  useEffect(() => {
+    if (!busy && !interactionActive.current && pendingLayerSync.current) syncLayers.current()
+  }, [busy, quadras])
 
   useEffect(() => {
     const group = editableGroup.current
@@ -153,7 +190,7 @@ function AdminDrawingMap({
     const control = new L.Control.Draw({
       position: 'topleft',
       draw: {
-        polygon: { allowIntersection: false, showArea: true },
+        polygon: { allowIntersection: false, showArea: true, maxPoints: 0, repeatMode: false },
         rectangle: false,
         circle: false,
         circlemarker: false,
@@ -162,16 +199,15 @@ function AdminDrawingMap({
       },
       edit: { featureGroup: group, remove: false },
     })
-    const controlAdded = !busy
-    if (controlAdded) map.addControl(control)
+    map.addControl(control)
 
     const created = (event: L.LeafletEvent) => {
-      if (busy) return
+      if (busyRef.current) return
       const layer = (event as L.DrawEvents.Created).layer
       callbacks.current.onCreate(geometriaDaCamada(layer))
     }
     const edited = (event: L.LeafletEvent) => {
-      if (busy) return
+      if (busyRef.current) return
       const changed = new Set<string>()
       ;(event as L.DrawEvents.Edited).layers.eachLayer((layer) => {
         const id = idsByLayer.current.get(layer)
@@ -192,14 +228,37 @@ function AdminDrawingMap({
       })
       if (geometries.length) callbacks.current.onGeometryEdit(geometries)
     }
+    const interactionStarted = () => {
+      interactionActive.current = true
+    }
+    const interactionStopped = () => {
+      interactionActive.current = false
+      window.setTimeout(() => {
+        if (!busyRef.current && pendingLayerSync.current) syncLayers.current()
+      }, 0)
+    }
 
     map.on(L.Draw.Event.CREATED, created)
     map.on(L.Draw.Event.EDITED, edited)
+    map.on(L.Draw.Event.DRAWSTART, interactionStarted)
+    map.on(L.Draw.Event.DRAWSTOP, interactionStopped)
+    map.on(L.Draw.Event.EDITSTART, interactionStarted)
+    map.on(L.Draw.Event.EDITSTOP, interactionStopped)
     return () => {
       map.off(L.Draw.Event.CREATED, created)
       map.off(L.Draw.Event.EDITED, edited)
-      if (controlAdded) map.removeControl(control)
+      map.off(L.Draw.Event.DRAWSTART, interactionStarted)
+      map.off(L.Draw.Event.DRAWSTOP, interactionStopped)
+      map.off(L.Draw.Event.EDITSTART, interactionStarted)
+      map.off(L.Draw.Event.EDITSTOP, interactionStopped)
+      map.removeControl(control)
     }
+  }, [map])
+
+  useEffect(() => {
+    const container = map.getContainer()
+    container.classList.toggle('admin-map-busy', busy)
+    return () => container.classList.remove('admin-map-busy')
   }, [map, busy])
 
   useEffect(() => {
@@ -258,10 +317,10 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
           setLoading(false)
         }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (active && version === loadVersion.current) {
           setLoading(false)
-          setMessage('Não foi possível carregar as quadras. Verifique a conexão e tente novamente.')
+          setMessage(mensagemErroLeitura(error))
         }
       })
     return () => { active = false }
@@ -272,11 +331,11 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
     if (!client) return
     const channel = client
       .channel('admin-quadras')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'quadras' }, () => { void carregar().catch(() => setMessage('Não foi possível atualizar as quadras. Tente novamente.')) })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'situacoes_quadras' }, () => { void carregar().catch(() => setMessage('Não foi possível atualizar as quadras. Tente novamente.')) })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'quadras' }, () => { void carregar().catch((error: unknown) => setMessage(mensagemErroLeitura(error))) })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'situacoes_quadras' }, () => { void carregar().catch((error: unknown) => setMessage(mensagemErroLeitura(error))) })
       .subscribe()
     const refreshTimer = window.setInterval(() => {
-      void carregar().catch(() => setMessage('Não foi possível atualizar as quadras. Tente novamente.'))
+      void carregar().catch((error: unknown) => setMessage(mensagemErroLeitura(error)))
     }, 30_000)
     return () => {
       window.clearInterval(refreshTimer)
@@ -299,11 +358,11 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
       setMessage(error instanceof Error ? error.message : 'A operação não foi concluída. Tente novamente.')
       try {
         await carregar()
-      } catch {
+      } catch (refreshError: unknown) {
         loadVersion.current += 1
         setQuadras([])
         setSelectedId(null)
-        setMessage((current) => `${current} Não foi possível atualizar a visualização persistida; a lista foi limpa até uma nova leitura bem-sucedida.`)
+        setMessage((current) => `${current} ${mensagemErroLeitura(refreshError)} A lista foi limpa até uma nova leitura bem-sucedida.`)
       }
     } finally {
       operationLock.current = false
@@ -314,6 +373,11 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
   const criar = useCallback((geometria: Geometry) => {
     void executarAdmin(async () => {
       if (!supabase) throw new Error('Supabase não configurado.')
+      const existingQuadras = await carregar()
+      const geometryKey = chaveGeometria(geometria)
+      if (existingQuadras.some((quadra) => chaveGeometria(quadra.geometria) === geometryKey)) {
+        throw new Error('Esta geometria já existe em uma quadra ativa. Nenhuma quadra duplicada foi criada.')
+      }
       const codes = await lerTodosCodigos()
       const maxCode = codes.reduce((max, code) => {
         const match = /^AC-(\d+)$/.exec(code)
@@ -323,7 +387,8 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
       const { data, error } = await supabase.rpc('admin_criar_quadra', { p_codigo: codigo, p_geometria: geometria })
       if (error) {
         if (error.code === '23505') throw new Error(`O código ${codigo} foi usado por outra operação. Atualize e tente novamente.`)
-        throw new Error('O Supabase não confirmou a criação da quadra. A operação não foi apresentada como salva.')
+        const safeCode = /^[0-9A-Z]{5}$/.test(error.code ?? '') ? ` Código: ${error.code}.` : ''
+        throw new Error(`O Supabase não confirmou a criação da quadra. A operação não foi apresentada como salva.${safeCode}`)
       }
       const created = data as RpcQuadra | null
       if (!created?.id || created.codigo !== codigo) {
@@ -358,9 +423,10 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
         })
         const savedQuadra = data as RpcQuadra | null
         if (error || savedQuadra?.id !== item.id || !savedQuadra.geometria) {
+          const safeCode = error && /^[0-9A-Z]{5}$/.test(error.code ?? '') ? ` Código: ${error.code}.` : ''
           throw new Error(savedCount
-            ? `${savedCount} geometria(s) foram salvas, mas outra alteração falhou. A lista será atualizada com o estado persistido.`
-            : 'O Supabase não confirmou a geometria. A visualização será atualizada com o estado persistido.')
+            ? `${savedCount} geometria(s) foram salvas, mas outra alteração falhou.${safeCode} A lista será atualizada com o estado persistido.`
+            : `O Supabase não confirmou a geometria.${safeCode} A visualização será atualizada com o estado persistido.`)
         }
         savedCount += 1
       }
@@ -385,7 +451,7 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
     setLoading(true)
     setMessage('')
     void carregar()
-      .catch(() => setMessage('Não foi possível carregar as quadras. Verifique a conexão e tente novamente.'))
+      .catch((error: unknown) => setMessage(mensagemErroLeitura(error)))
   }
 
   return (
@@ -406,7 +472,7 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
         </label>
         {selected && <p className="selected-quadra">Selecionada: <strong>{selected.codigo}</strong> · {NOMES[selected.situacao]}</p>}
         <div className="admin-map-actions">
-          <p>Use o ícone de polígono no mapa para criar. Para editar, selecione a ferramenta de edição e ajuste os vértices.</p>
+          <p>Para criar, escolha o polígono: cada clique marca um vértice. Finalize clicando novamente no primeiro ponto ou dando duplo clique no último ponto. Para editar, selecione a ferramenta de edição e ajuste os vértices.</p>
           <button type="button" onClick={arquivar} disabled={!selected || busy || loading}>Arquivar quadra selecionada</button>
           <button type="button" onClick={retryLoad} disabled={busy || loading}>Atualizar dados</button>
         </div>
