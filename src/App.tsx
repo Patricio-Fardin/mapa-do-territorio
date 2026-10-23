@@ -58,17 +58,41 @@ async function validarPerfilAdmin(client: NonNullable<typeof supabase>, userId: 
   }
 }
 
+async function validarUsuarioAdmin(
+  client: NonNullable<typeof supabase>,
+  user: { id: string; email?: string },
+  expectedEmail: string,
+  expectedUserId?: string,
+): Promise<ResultadoAutorizacao> {
+  if (
+    !user.email ||
+    user.email.trim().toLocaleLowerCase() !== expectedEmail.trim().toLocaleLowerCase() ||
+    (expectedUserId && user.id !== expectedUserId)
+  ) {
+    return encerrarSessao(client, 'Não foi possível confirmar a autorização administrativa.')
+  }
+  return validarPerfilAdmin(client, user.id)
+}
+
+type AdminView = 'login' | 'recovery-request' | 'recovery-verify' | 'recovery-password'
+
 function AdminPage({ onBack }: { onBack: () => void }) {
   const client = supabase
   const adminUsername = import.meta.env.VITE_ADMIN_USERNAME?.trim() || 'admin'
   const adminLoginEmail = import.meta.env.VITE_ADMIN_LOGIN_EMAIL?.trim() || ''
+  const [view, setView] = useState<AdminView>('login')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [passwordConfirmation, setPasswordConfirmation] = useState('')
+  const [recoveryCode, setRecoveryCode] = useState('')
+  const [recoveryUserId, setRecoveryUserId] = useState<string | null>(null)
+  const [recoveryAttempts, setRecoveryAttempts] = useState(0)
   const [showPassword, setShowPassword] = useState(false)
   const [message, setMessage] = useState('')
   const [loadingMessage, setLoadingMessage] = useState<string | null>('Verificando sessão…')
   const [autorizado, setAutorizado] = useState(false)
   const submitting = useRef(false)
+  const recoveryRequestCooldown = useRef(0)
   const configurationIncomplete = !client || !adminLoginEmail
 
   useEffect(() => {
@@ -91,7 +115,7 @@ function AdminPage({ onBack }: { onBack: () => void }) {
           return
         }
 
-        const resultado = await validarPerfilAdmin(client, data.session.user.id)
+        const resultado = await validarUsuarioAdmin(client, data.session.user, adminLoginEmail)
         if (active) {
           setAutorizado(resultado.autorizado)
           setMessage(mensagemAutorizacao(resultado))
@@ -134,7 +158,7 @@ function AdminPage({ onBack }: { onBack: () => void }) {
         setMessage(resultado.mensagem)
         return
       }
-      const resultado = await validarPerfilAdmin(client, data.user.id)
+      const resultado = await validarUsuarioAdmin(client, data.user, adminLoginEmail)
       setAutorizado(resultado.autorizado)
       setMessage(mensagemAutorizacao(resultado))
     } catch {
@@ -142,6 +166,168 @@ function AdminPage({ onBack }: { onBack: () => void }) {
       setMessage(resultado.mensagem)
     } finally {
       setPassword('')
+      submitting.current = false
+      setLoadingMessage(null)
+    }
+  }
+
+  const solicitarRecuperacao = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!client || configurationIncomplete || loadingMessage || submitting.current) return
+    if (Date.now() < recoveryRequestCooldown.current) {
+      setMessage('Aguarde 60 segundos antes de solicitar outro código.')
+      return
+    }
+    submitting.current = true
+    setLoadingMessage('Solicitando código…')
+    setMessage('')
+    try {
+      recoveryRequestCooldown.current = Date.now() + 60_000
+      const { error } = await client.auth.resetPasswordForEmail(adminLoginEmail)
+      if (error) {
+        setMessage('Não foi possível solicitar o código agora. Aguarde e tente novamente.')
+        return
+      }
+      setRecoveryCode('')
+      setRecoveryAttempts(0)
+      setView('recovery-verify')
+      setMessage('Se a conta administrativa estiver disponível, um código será enviado. Aguarde 60 segundos antes de pedir outro.')
+    } catch {
+      setMessage('Não foi possível solicitar o código agora. Aguarde e tente novamente.')
+    } finally {
+      submitting.current = false
+      setLoadingMessage(null)
+    }
+  }
+
+  const verificarCodigo = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!client || configurationIncomplete || loadingMessage || submitting.current) return
+    const code = recoveryCode.trim()
+    if (!/^\d{6}$/.test(code)) {
+      setMessage('Digite o código numérico de seis dígitos recebido por e-mail.')
+      return
+    }
+
+    submitting.current = true
+    setLoadingMessage('Validando código…')
+    setMessage('')
+    try {
+      const { data, error } = await client.auth.verifyOtp({
+        email: adminLoginEmail,
+        token: code,
+        type: 'recovery',
+      })
+      if (error || !data.user) {
+        const attempts = recoveryAttempts + 1
+        setRecoveryAttempts(attempts)
+        setRecoveryCode('')
+        if (attempts >= 5) {
+          setView('recovery-request')
+          setMessage('O código não foi aceito após várias tentativas. Solicite um novo código.')
+        } else if (error && 'code' in error && error.code === 'otp_expired') {
+          setMessage('O código expirou ou já foi usado. Solicite um novo código.')
+        } else {
+          setMessage('Código inválido ou expirado. Confira e tente novamente.')
+        }
+        return
+      }
+
+      const resultado = await validarUsuarioAdmin(client, data.user, adminLoginEmail)
+      if (!resultado.autorizado) {
+        setRecoveryCode('')
+        setView('login')
+        setMessage('Não foi possível confirmar a autorização administrativa. Entre em contato com o responsável.')
+        return
+      }
+
+      setRecoveryUserId(data.user.id)
+      setRecoveryCode('')
+      setView('recovery-password')
+      setMessage('Código validado. Defina uma nova senha para a conta administrativa.')
+    } catch {
+      const resultado = await encerrarSessao(client, 'Não foi possível validar o código.')
+      setRecoveryCode('')
+      setView('recovery-request')
+      setMessage(resultado.mensagem)
+    } finally {
+      submitting.current = false
+      setLoadingMessage(null)
+    }
+  }
+
+  const atualizarSenha = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!client || configurationIncomplete || loadingMessage || submitting.current) return
+    if (password.length < 6) {
+      setMessage('A senha deve ter pelo menos seis caracteres.')
+      return
+    }
+    if (password !== passwordConfirmation) {
+      setMessage('As senhas não coincidem.')
+      return
+    }
+    if (!recoveryUserId) {
+      setView('recovery-request')
+      setMessage('A validação expirou. Solicite um novo código.')
+      return
+    }
+
+    submitting.current = true
+    setLoadingMessage('Atualizando senha…')
+    setMessage('')
+    try {
+      const { data, error: sessionError } = await client.auth.getUser()
+      if (sessionError || !data.user) {
+        const resultado = await encerrarSessao(client, 'A validação expirou. Solicite um novo código.')
+        setView('recovery-request')
+        setMessage(resultado.mensagem)
+        return
+      }
+
+      const resultado = await validarUsuarioAdmin(client, data.user, adminLoginEmail, recoveryUserId)
+      if (!resultado.autorizado) {
+        setRecoveryUserId(null)
+        setView('login')
+        setMessage('Não foi possível confirmar a autorização administrativa. Entre em contato com o responsável.')
+        return
+      }
+
+      const { error } = await client.auth.updateUser({ password })
+      if (error) {
+        setMessage('Não foi possível atualizar a senha. Verifique os requisitos e tente novamente.')
+        return
+      }
+
+      const { data: updatedUser, error: updatedUserError } = await client.auth.getUser()
+      if (updatedUserError || !updatedUser.user) {
+        const failedAuthorization = await encerrarSessao(client, 'A senha foi alterada, mas não foi possível confirmar a autorização.')
+        setAutorizado(false)
+        setRecoveryUserId(null)
+        setView('login')
+        setMessage(failedAuthorization.mensagem)
+        return
+      }
+      const updatedAuthorization = await validarUsuarioAdmin(client, updatedUser.user, adminLoginEmail, recoveryUserId)
+      if (!updatedAuthorization.autorizado) {
+        setAutorizado(false)
+        setRecoveryUserId(null)
+        setView('login')
+        setMessage('A senha foi alterada, mas não foi possível confirmar a autorização administrativa.')
+        return
+      }
+
+      setPassword('')
+      setPasswordConfirmation('')
+      setRecoveryUserId(null)
+      setAutorizado(true)
+      setView('login')
+      setMessage('Senha atualizada e autorização administrativa confirmada.')
+    } catch {
+      setMessage('Não foi possível atualizar a senha. Tente novamente.')
+    } finally {
+      setPassword('')
+      setPasswordConfirmation('')
       submitting.current = false
       setLoadingMessage(null)
     }
@@ -178,23 +364,37 @@ function AdminPage({ onBack }: { onBack: () => void }) {
           <p>A autenticação foi confirmada. As operações de criação, edição e arquivamento de quadras ainda não estão conectadas ao banco.</p>
           <button className="primary-action" onClick={() => void sair()} disabled={Boolean(loadingMessage) || !client}>Encerrar sessão</button>
         </section>
-      ) : !loadingMessage && (
+      ) : !loadingMessage && view === 'login' ? (
         <form onSubmit={(event) => void entrar(event)}>
           <p>Entre com o nome de usuário e a senha da conta administrativa existente.</p>
-          <label>
-            Nome de usuário
-            <input type="text" value={username} onChange={(event) => setUsername(event.target.value)} required autoComplete="username" disabled={Boolean(loadingMessage) || configurationIncomplete} />
-          </label>
-          <label>
-            Senha
-            <input type={showPassword ? 'text' : 'password'} value={password} onChange={(event) => setPassword(event.target.value)} required autoComplete="current-password" disabled={Boolean(loadingMessage) || configurationIncomplete} />
-          </label>
-          <button type="button" onClick={() => setShowPassword((visible) => !visible)} disabled={Boolean(loadingMessage) || configurationIncomplete}>
-            {showPassword ? 'Ocultar senha' : 'Mostrar senha'}
-          </button>
-          <button className="primary-action" type="submit" disabled={Boolean(loadingMessage) || configurationIncomplete}>Entrar</button>
+          <label>Nome de usuário<input type="text" value={username} onChange={(event) => setUsername(event.target.value)} required autoComplete="username" disabled={configurationIncomplete} /></label>
+          <label>Senha<input type={showPassword ? 'text' : 'password'} value={password} onChange={(event) => setPassword(event.target.value)} required autoComplete="current-password" disabled={configurationIncomplete} /></label>
+          <button type="button" onClick={() => setShowPassword((visible) => !visible)} disabled={configurationIncomplete}>{showPassword ? 'Ocultar senha' : 'Mostrar senha'}</button>
+          <button className="primary-action" type="submit" disabled={configurationIncomplete}>Entrar</button>
+          <button type="button" onClick={() => { setView('recovery-request'); setMessage('') }} disabled={configurationIncomplete}>Esqueci minha senha</button>
         </form>
-      )}
+      ) : !loadingMessage && view === 'recovery-request' ? (
+        <form onSubmit={(event) => void solicitarRecuperacao(event)}>
+          <p>Solicite um código numérico de recuperação para a conta administrativa.</p>
+          <button className="primary-action" type="submit" disabled={configurationIncomplete}>Enviar código</button>
+          <button type="button" onClick={() => { setView('login'); setMessage('') }}>Voltar ao login</button>
+        </form>
+      ) : !loadingMessage && view === 'recovery-verify' ? (
+        <form onSubmit={(event) => void verificarCodigo(event)}>
+          <p>Digite o código de seis dígitos enviado ao e-mail da conta administrativa.</p>
+          <label>Código de recuperação<input type="text" value={recoveryCode} onChange={(event) => setRecoveryCode(event.target.value.replace(/\D/g, '').slice(0, 6))} required inputMode="numeric" autoComplete="one-time-code" pattern="\d{6}" aria-label="Código de recuperação de seis dígitos" /></label>
+          <button className="primary-action" type="submit">Validar código</button>
+          <button type="button" onClick={() => { setView('recovery-request'); setRecoveryCode(''); setMessage('') }}>Solicitar outro código</button>
+        </form>
+      ) : !loadingMessage && view === 'recovery-password' ? (
+        <form onSubmit={(event) => void atualizarSenha(event)}>
+          <p>Defina uma nova senha para a conta administrativa autorizada.</p>
+          <label>Nova senha<input type={showPassword ? 'text' : 'password'} value={password} onChange={(event) => setPassword(event.target.value)} required minLength={6} autoComplete="new-password" /></label>
+          <label>Confirme a nova senha<input type={showPassword ? 'text' : 'password'} value={passwordConfirmation} onChange={(event) => setPasswordConfirmation(event.target.value)} required minLength={6} autoComplete="new-password" /></label>
+          <button type="button" onClick={() => setShowPassword((visible) => !visible)}>{showPassword ? 'Ocultar senha' : 'Mostrar senha'}</button>
+          <button className="primary-action" type="submit">Atualizar senha</button>
+        </form>
+      ) : null}
       {message && <p role="alert">{message}</p>}
     </main>
   )

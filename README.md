@@ -29,6 +29,7 @@ Quando o Supabase estiver configurado e as migrations aplicadas:
 - `/` é o mapa público e não exige cadastro ou login.
 - Visitantes podem ler quadras ativas e alterar a situação pela operação colaborativa autorizada no banco.
 - `/admin` autentica com nome de usuário e senha por `signInWithPassword`; o login não envia e-mail, link mágico ou código OTP.
+- A opção **Esqueci minha senha** solicita um código de recuperação pelo Supabase Auth. A troca de senha só continua após validar o código e confirmar que a conta autenticada é a conta configurada e mantém `public.perfis.papel = 'admin'`.
 - O nome de usuário é um alias configurado no frontend. `VITE_ADMIN_LOGIN_EMAIL` mapeia esse alias para o e-mail da conta Auth administrativa existente e fica visível no bundle; não é um segredo.
 - A conta Auth administrativa existente deve continuar associada ao perfil atual. O frontend não oferece cadastro nem cria outra conta.
 - O acesso administrativo só é concedido quando a consulta a `public.perfis` confirma `papel = 'admin'` para o usuário autenticado. Falha na consulta ou papel diferente encerra a sessão.
@@ -38,6 +39,18 @@ Quando o Supabase estiver configurado e as migrations aplicadas:
 Configure `VITE_ADMIN_USERNAME` (opcional; padrão `admin`) e `VITE_ADMIN_LOGIN_EMAIL` (obrigatório) junto às variáveis Supabase em **Settings → Secrets and variables → Actions → Variables** do repositório. Use o e-mail da conta Auth que já corresponde ao perfil com `papel = 'admin'`. Essas variáveis de frontend são públicas; não cadastre senhas ou chaves privilegiadas nelas.
 
 Para desenvolvimento local, copie `.env.example` para `.env.local` e preencha as variáveis `VITE_*` sem usar credenciais privilegiadas. `.env.local` é ignorado pelo Git.
+
+### Configurar o e-mail de recuperação
+
+Configure manualmente no Supabase Dashboard em **Authentication → Email Templates → Reset Password**. Edite o modelo para enviar o token numérico de recuperação, usando `{{ .Token }}` no corpo do e-mail, em vez de depender de um link clicável de confirmação. Exemplo:
+
+```html
+<h2>Redefinição de senha</h2>
+<p>Digite este código na página administrativa:</p>
+<p><strong>{{ .Token }}</strong></p>
+```
+
+Essa configuração remota não é alterada pelo repositório e precisa ser feita e testada pelo proprietário no projeto Supabase correto. A tela impede reenvios por 60 segundos, e o Auth também pode aplicar seu próprio limite. A interface limita a cinco tentativas de validação por código e exige solicitar outro código após esse limite. A recuperação não cria usuários, não altera perfis e não concede papel administrativo.
 
 ### Definir senha da conta Auth existente
 
