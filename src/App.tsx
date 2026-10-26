@@ -8,6 +8,7 @@ import {
   normalizarSituacaoQuadra,
   type SituacaoQuadra,
 } from './lib/quadra-status'
+import { criarIdentificacaoQuadra } from './lib/quadra-label'
 import 'leaflet/dist/leaflet.css'
 import 'leaflet-draw/dist/leaflet.draw.css'
 import 'leaflet-draw'
@@ -59,7 +60,16 @@ function PersistedLayers({ quadras, onSelect, layers }: { quadras: Quadra[]; onS
   const map = useMap()
   useEffect(() => {
     const group = L.featureGroup().addTo(map)
+    const labels = L.layerGroup().addTo(map)
     const currentLayers = layers.current
+    const atualizarRotulos = () => {
+      labels.clearLayers()
+      quadras.forEach((quadra) => {
+        if (!quadra.geometria) return
+        const label = criarIdentificacaoQuadra(map, quadra.geometria, quadra.codigo, quadra.situacao, CORES[quadra.situacao])
+        if (label) labels.addLayer(label)
+      })
+    }
     quadras.forEach((quadra) => {
       if (!quadra.geometria) return
       const feature = L.geoJSON(quadra.geometria as GeoJSON.GeoJsonObject)
@@ -72,8 +82,12 @@ function PersistedLayers({ quadras, onSelect, layers }: { quadras: Quadra[]; onS
       })
       currentLayers.set(quadra.id, parts)
     })
+    atualizarRotulos()
+    map.on('zoomend', atualizarRotulos)
     return () => {
+      map.off('zoomend', atualizarRotulos)
       map.removeLayer(group)
+      map.removeLayer(labels)
       quadras.forEach((quadra) => currentLayers.delete(quadra.id))
     }
   }, [map, quadras, onSelect, layers])

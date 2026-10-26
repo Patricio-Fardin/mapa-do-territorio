@@ -1,124 +1,91 @@
 # Mapa de Territórios
 
-Sistema web para acompanhar quadras territoriais na cidade de Alfredo Chaves, Espírito Santo.
+Aplicação web para acompanhar quadras territoriais em Alfredo Chaves, Espírito Santo. O frontend usa React, TypeScript, Vite, Leaflet e React-Leaflet; quando configurado, o Supabase fornece autenticação, dados persistidos e operações autorizadas.
 
-## Estado atual
+## Funcionalidades
 
-O projeto mantém desenvolvimento local e publicação no GitHub Pages. A aplicação abre um mapa OpenStreetMap centrado em Alfredo Chaves e oferece uma área administrativa para criar, editar e arquivar quadras com persistência no Supabase.
+- Mapa OpenStreetMap centrado em Alfredo Chaves/ES, com layout responsivo e controles de zoom.
+- Quadras com códigos automáticos no formato `AC-001`, `AC-002` etc.
+- Desenho administrativo de polígonos com múltiplos vértices e edição posterior da geometria. O desenho é concluído pela interação normal do Leaflet Draw; a persistência usa `admin_criar_quadra` e `admin_atualizar_geometria`.
+- Suporte a geometrias GeoJSON `Polygon` e `MultiPolygon`.
+- Etiquetas permanentes no mapa público e administrativo com código e situação. O ponto da etiqueta é calculado dentro do polígono; em quadras pequenas a apresentação é compactada. As etiquetas não interceptam cliques.
+- Situações públicas: **Pendente** (cinza `#78858a`), **Concluída** (verde `#27ae60`) e **Refazer** (laranja `#e67e22`). A alteração confirmada atualiza a situação, cor, etiqueta, contadores e percentual; a situação persistida pelo Supabase é carregada novamente do servidor.
+- Contadores e seleção pública por toque, sem disponibilizar desenho, edição de limites ou exclusão aos visitantes.
+- Atualizações do mapa por leitura do Supabase e Realtime quando habilitado.
 
-Funcionalidades atuais:
+## Acesso e autorização
 
-- React + TypeScript + Vite.
-- Leaflet, React-Leaflet e Leaflet Draw.
-- Mapa OpenStreetMap com zoom.
-- A autenticação administrativa é verificada pelo perfil no Supabase; usuários autorizados podem criar, editar geometrias e arquivar quadras na área `/admin`.
-- Códigos automáticos no formato `AC-001`, `AC-002` etc.
-- Menu Leaflet ancorado à quadra com três ações:
-  - Concluída — verde `#27ae60`.
-  - Pendente — cinza `#78858a`.
-  - Refazer — laranja `#e67e22`.
-- Atualização imediata da cor e dos contadores.
-- Contadores de total, pendentes, concluídas, refazer e percentual de conclusão.
-- Modo Acompanhamento: selecionar quadras e alterar a situação, sem ferramentas administrativas.
-- Interface responsiva para telas pequenas e toque.
+- `/` apresenta o mapa público; `/admin` é a área administrativa.
+- O login administrativo recebe alias e senha. O alias é normalizado sem diferenciar maiúsculas/minúsculas e mapeado para `VITE_ADMIN_LOGIN_EMAIL`; a autenticação usa `signInWithPassword`, sem envio de link mágico ou OTP no login.
+- Depois de autenticar e ao recuperar uma sessão existente, a aplicação consulta `public.perfis` e só autoriza o usuário quando `papel = 'admin'`. Falha de consulta ou perfil não administrativo encerra a sessão local.
+- A recuperação de senha é um fluxo separado do login e usa o Supabase Auth. Ela não cria usuários nem concede papel administrativo.
+- Operações estruturais são executadas por RPCs que verificam `public.eh_admin()` no servidor. O cliente frontend não recebe chaves privilegiadas nem permissão de exclusão direta nas tabelas.
 
-## Acesso público e área administrativa
+## Arquivar e excluir definitivamente
 
-Quando o Supabase estiver configurado e as migrations aplicadas:
+**Arquivar** chama `admin_arquivar_quadra`, define `ativa = false` e preserva o registro, situação e histórico. A quadra deixa de aparecer no mapa público e permanece localizável na lista administrativa de arquivadas.
 
-- `/` é o mapa público e não exige cadastro ou login.
-- Visitantes podem ler quadras ativas e alterar a situação pela operação colaborativa autorizada no banco.
-- `/admin` autentica com nome de usuário e senha por `signInWithPassword`; o login não envia e-mail, link mágico ou código OTP.
-- A opção **Esqueci minha senha** solicita um link de recuperação pelo Supabase Auth. Ao retornar, a aplicação valida a sessão e confirma o e-mail e o perfil `public.perfis.papel = 'admin'` antes de permitir a troca da senha.
-- Depois do login, a área administrativa permite desenhar novas quadras, editar geometrias existentes e arquivar quadras. As alterações estruturais são feitas somente pelas RPCs administrativas do banco; o mapa público continua sem ferramentas de desenho/arquivamento.
-- O nome de usuário é um alias configurado no frontend. `VITE_ADMIN_LOGIN_EMAIL` mapeia esse alias para o e-mail da conta Auth administrativa existente e fica visível no bundle; não é um segredo.
-- A conta Auth administrativa existente deve continuar associada ao perfil atual. O frontend não oferece cadastro nem cria outra conta.
-- O acesso administrativo só é concedido quando a consulta a `public.perfis` confirma `papel = 'admin'` para o usuário autenticado. Falha na consulta ou papel diferente encerra a sessão.
-- A UI não é a proteção principal: as políticas RLS e a função SQL validam as operações no banco.
-- A autorização da interface é revalidada antes de cada operação administrativa; as RPCs e políticas do banco continuam sendo a autoridade final.
+**Excluir definitivamente** é uma ação distinta e irreversível. A interface exige digitar exatamente `EXCLUIR <código>` e uma confirmação final. A RPC `admin_excluir_quadra(p_quadra_id uuid)` valida a autorização administrativa no servidor e, na mesma transação, exclui os registros de `public.historico_quadras`, `public.situacoes_quadras` e `public.quadras`, nessa ordem. A interface chama exclusivamente essa RPC e só remove a quadra da lista após confirmação de sucesso. Usuários públicos não têm acesso à ação nem podem executar a RPC sem autorização administrativa.
 
-Configure `VITE_ADMIN_USERNAME` (opcional; padrão `admin`) e `VITE_ADMIN_LOGIN_EMAIL` (obrigatório) junto às variáveis Supabase em **Settings → Secrets and variables → Actions → Variables** do repositório. Use o e-mail da conta Auth que já corresponde ao perfil com `papel = 'admin'`. Essas variáveis de frontend são públicas; não cadastre senhas ou chaves privilegiadas nelas.
+## Supabase e migrations
 
-Para desenvolvimento local, copie `.env.example` para `.env.local` e preencha as variáveis `VITE_*` sem usar credenciais privilegiadas. `.env.local` é ignorado pelo Git.
+As migrations do repositório, em ordem, são:
 
-### Configurar o e-mail de recuperação
+1. `supabase/migrations/20261022000100_initial_schema.sql` — tabelas, tipos, `eh_admin`, situação pública e políticas iniciais.
+2. `supabase/migrations/20261022000200_public_map_admin_policies.sql` — políticas atuais e RPCs de criação, edição de geometria, arquivamento e atualização pública de situação.
+3. `supabase/migrations/20261026132516_admin_excluir_quadra.sql` — RPC de exclusão definitiva e seus privilégios. Conforme informado, esta migration já foi aplicada ao Supabase de produção `bkjcfzotxfapgtxkoswb`; não a reaplique.
 
-A recuperação usa o modelo padrão de link do Supabase; não é necessário editar **Authentication → Email Templates → Reset Password**. Em **Authentication → URL Configuration → Redirect URLs**, permita a URL de retorno da aplicação: `https://patricio-fardin.github.io/mapa-do-territorio/admin`. O fluxo limpa parâmetros e tokens da barra de endereço após processar o retorno do link. A tela impede reenvios por 60 segundos, e o Auth também pode aplicar seu próprio limite. Link expirado ou inválido exige solicitar uma nova recuperação. A troca de senha não cria usuários, não altera perfis e não concede papel administrativo.
+A migration de exclusão já foi aplicada ao projeto Supabase de produção `bkjcfzotxfapgtxkoswb`, conforme confirmação do proprietário. A interface que oferece a ação deve ser publicada depois da migration. Não reaplique essa migration. Antes de qualquer outra alteração de banco, confira o projeto e o histórico remoto e exija uma prévia que liste somente as migrations pretendidas. Este repositório não aplica migrations automaticamente.
 
-### Definir senha da conta Auth existente
+Para desenvolvimento local, copie `.env.example` para `.env.local` e configure somente valores públicos:
 
-O login por senha não define uma senha automaticamente. Se a conta Auth existente ainda não tiver senha, o proprietário pode executar uma única vez o utilitário local abaixo, apontando explicitamente para o UUID desse usuário:
-
-```powershell
-# Configure estas variáveis no ambiente local seguro, sem gravá-las no repositório.
-$env:SUPABASE_URL = "<URL do projeto Supabase>"
-$env:SUPABASE_SERVICE_ROLE_KEY = "<chave administrativa secreta>"
-npm.cmd run admin:set-password -- <UUID_DO_USUARIO_AUTH_EXISTENTE>
+```text
+VITE_SUPABASE_URL=
+VITE_SUPABASE_PUBLISHABLE_KEY=
+VITE_ADMIN_USERNAME=admin
+VITE_ADMIN_LOGIN_EMAIL=
 ```
 
-O utilitário exige um UUID como argumento, solicita a senha duas vezes sem ecoá-la, não imprime credenciais e atualiza somente esse usuário pelo Admin API. Não o execute sem autorização explícita do proprietário; nunca use essa chave em `VITE_*`, no frontend ou no Git. A conta e o registro de `public.perfis` não são criados, substituídos ou alterados por esse procedimento.
+`VITE_ADMIN_USERNAME` é opcional (padrão `admin`) e `VITE_ADMIN_LOGIN_EMAIL` é o e-mail público de mapeamento da conta Auth já associada ao perfil administrador. Essas variáveis `VITE_*` ficam visíveis no bundle e não podem conter senhas, service role ou outras chaves secretas. `.env.local` é ignorado pelo Git. Para GitHub Pages, as mesmas variáveis públicas são configuradas como Actions Variables consumidas por `.github/workflows/deploy.yml`.
 
-## Limitações atuais
+Não crie nem substitua a conta administrativa ou seu perfil para configurar o projeto. Não altere permissões ou dados remotos fora de uma mudança autorizada e revisada.
 
-- Sem Supabase configurado, os dados locais temporários não persistem após recarregar a página.
-- O mapa público usa o cliente Supabase para carregar quadras e persistir mudanças de situação quando configurado; a configuração e as migrations do projeto remoto precisam ser verificadas separadamente.
-- A criação, edição de geometria e arquivamento usam, respectivamente, `admin_criar_quadra`, `admin_atualizar_geometria` e `admin_arquivar_quadra`; operações administrativas dependem da configuração e autorização do projeto Supabase.
-- A sincronização Realtime depende de habilitar a tabela no projeto Supabase.
-- Arquivamento é uma operação reversível lógica (`ativa=false`) que preserva a quadra e seu histórico. Exclusão física não é permitida pela interface pública e não deve ser usada como rotina administrativa.
-- Ainda não há importação/exportação de backup JSON.
-- O frontend está publicado no GitHub Pages em `https://patricio-fardin.github.io/mapa-do-territorio/`.
+## Desenvolvimento e verificações
 
-## Tecnologias
-
-- Node.js LTS e npm.
-- React 19.
-- TypeScript.
-- Vite.
-- Leaflet 1.9.
-- React-Leaflet 5.
-- Leaflet Draw.
-- OpenStreetMap.
-
-## Como executar no Windows PowerShell
+No Windows PowerShell, a partir da raiz do repositório:
 
 ```powershell
-cd "C:\Users\patricio.fardin\Documents\ChatGPT\Mapa interativo"
-$env:Path = "C:\Program Files\nodejs;$env:Path"
 npm.cmd install
 npm.cmd run dev
 ```
 
-Abra `http://localhost:5173/mapa-do-territorio/` no navegador. A área administrativa está em `http://localhost:5173/mapa-do-territorio/admin`.
-
-O uso de `npm.cmd` evita o bloqueio do PowerShell ao arquivo `npm.ps1`.
-
-Para testar `/admin` localmente, configure também `VITE_ADMIN_USERNAME` e `VITE_ADMIN_LOGIN_EMAIL` em `.env.local`.
-
-## Verificação de produção
+Abra `http://localhost:5173/mapa-do-territorio/`; a rota administrativa local é `/mapa-do-territorio/admin`. Para verificar alterações:
 
 ```powershell
 npm.cmd run build
+npm.cmd run lint
+git diff --check
 ```
 
-O build foi verificado com sucesso em 22/10/2026.
+O build executa TypeScript, Vite e `scripts/copy-404.mjs`. O lint usa Oxlint. Antes de publicar, revise o diff e o status, confirme que nenhum arquivo de ambiente, credencial ou alteração alheia foi incluído e aguarde o workflow GitHub Actions de build e deploy.
+
+## Testes e limitações
+
+Build e lint locais não substituem testes reais de autenticação, privilégios ou transações no banco. Não teste exclusão no Supabase de produção e não use quadras reais como dados de teste. Verifique criação, edição e situações no mapa com dados de desenvolvimento; para testar a RPC de exclusão, use um projeto isolado com dados descartáveis e confirme que falhas revertem a operação. Não declare a exclusão remota testada sem uma execução autorizada e verificável.
+
+Para restaurar o projeto com segurança, siga [`PROMPT_RESTAURACAO.md`](PROMPT_RESTAURACAO.md). O documento inclui a estrutura, migrations, checagens de projeto e cuidados para não apagar dados.
 
 ## Estrutura principal
 
-- `src/App.tsx`: mapa, desenho, modos, menu das quadras e contadores.
-- `src/App.css`: layout, cores, responsividade e aparência do menu.
-- `src/main.tsx`: ponto de entrada React.
-- `package.json`: scripts e dependências.
-- `backup-*`: cópias locais criadas antes de alterações estruturais.
+- `src/App.tsx` — mapa público, autenticação e recuperação administrativa, situação e contadores.
+- `src/components/AdminMap.tsx` — desenho, edição, arquivamento e exclusão administrativa.
+- `src/lib/quadra-label.ts` — cálculo e renderização de etiquetas dentro dos polígonos.
+- `src/lib/quadra-status.ts` — validação e normalização de situações.
+- `src/lib/supabase.ts` — cliente Supabase configurado pelas variáveis públicas.
+- `src/App.css` e `src/index.css` — estilos e responsividade.
+- `supabase/migrations/` — esquema, políticas e RPCs versionadas.
+- `.github/workflows/deploy.yml` — build e publicação no GitHub Pages.
 
-## Próximas etapas
+## Publicação
 
-1. Confirmar as variáveis de build do GitHub Actions, inclusive o alias e o e-mail da conta Auth existente.
-2. Executar as migrations em `supabase/migrations/` na ordem numérica, se ainda não aplicadas pelo proprietário.
-3. Habilitar Realtime para as tabelas necessárias.
-4. Validar RLS e operações públicas e administrativas.
-5. Implementar backup JSON.
-6. Criar testes locais e em dois dispositivos.
-
-## Cuidados com os dados
-
-Não armazenar nomes, endereços pessoais, telefones ou outras informações de moradores. As observações devem tratar somente do andamento geral do trabalho territorial.
+O site é servido em `https://patricio-fardin.github.io/mapa-do-territorio/`. A migration `20261026132516_admin_excluir_quadra.sql` já foi informada como aplicada em `bkjcfzotxfapgtxkoswb`; esta publicação atualiza a interface após essa aplicação. Para migrations futuras, verifique o repositório e o projeto Supabase por identificador explícito, compare os históricos local/remoto, revise a prévia `db push --dry-run` e aplique somente a mudança pretendida. Confirme o workflow Actions desta publicação. Não use `db reset`, force push, exclusões de teste em produção nem publique a interface antes da migration correspondente.

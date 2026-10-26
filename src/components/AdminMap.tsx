@@ -8,9 +8,10 @@ import {
   normalizarSituacaoQuadra,
   type SituacaoQuadra,
 } from '../lib/quadra-status'
+import { criarIdentificacaoQuadra } from '../lib/quadra-label'
 
 type Situacao = SituacaoQuadra
-type Quadra = { id: string; codigo: string; situacao: Situacao; geometria: Geometry }
+type Quadra = { id: string; codigo: string; situacao: Situacao; geometria: Geometry; ativa: boolean }
 type GeometriaEditada = { id: string; geometria: Geometry }
 type RpcQuadra = { id?: string; codigo?: string; geometria?: Geometry }
 type Props = { adminEmail: string; onUnauthorized: () => void }
@@ -23,11 +24,12 @@ function aplicarEstilo(layer: L.Layer, situacao: Situacao) {
   ;(layer as L.Path).setStyle({ color: CORES[situacao], fillColor: CORES[situacao], fillOpacity: .42, opacity: .95, weight: 2 })
 }
 
-function normalizarQuadras(rows: Array<{ id: string; codigo: string; geometria: Geometry; situacoes_quadras?: unknown }>): Quadra[] {
+function normalizarQuadras(rows: Array<{ id: string; codigo: string; geometria: Geometry; ativa: boolean; situacoes_quadras?: unknown }>): Quadra[] {
   return rows.map((row) => ({
     id: row.id,
     codigo: row.codigo,
     geometria: row.geometria,
+    ativa: row.ativa,
     situacao: normalizarSituacaoQuadra(row.situacoes_quadras),
   }))
 }
@@ -38,7 +40,7 @@ function mensagemErroLeitura(error: unknown): string {
     : 'Não foi possível carregar as quadras. Verifique a conexão e tente novamente.'
 }
 
-async function lerQuadrasAtivas(): Promise<Quadra[]> {
+async function lerQuadrasPorAtividade(ativa: boolean): Promise<Quadra[]> {
   if (!supabase) throw new Error('Supabase não configurado.')
   const pageSize = 1000
   const quadras: Quadra[] = []
@@ -46,10 +48,10 @@ async function lerQuadrasAtivas(): Promise<Quadra[]> {
     const { data, error } = await supabase
       .from('quadras')
       .select('id,codigo,geometria,ativa,situacoes_quadras(situacao)')
-      .eq('ativa', true)
+      .eq('ativa', ativa)
       .order('id')
       .range(offset, offset + pageSize - 1)
-    if (error) throw new Error('Não foi possível carregar as quadras ativas.')
+    if (error) throw new Error(`Não foi possível carregar as quadras ${ativa ? 'ativas' : 'arquivadas'}.`)
     quadras.push(...normalizarQuadras(data ?? []))
     if ((data?.length ?? 0) < pageSize) return quadras
   }
@@ -121,6 +123,7 @@ function AdminDrawingMap({
   onSelect,
   onCreate,
   onGeometryEdit,
+  onCancel,
 }: {
   quadras: Quadra[]
   selectedId: string | null
@@ -128,20 +131,22 @@ function AdminDrawingMap({
   onSelect: (id: string) => void
   onCreate: (geometry: Geometry) => void
   onGeometryEdit: (geometries: GeometriaEditada[]) => void
+  onCancel: () => void
 }) {
   const map = useMap()
   const editableGroup = useRef<L.FeatureGroup | null>(null)
+  const labelsGroup = useRef<L.LayerGroup | null>(null)
   const idsByLayer = useRef(new WeakMap<L.Layer, string>())
   const originalTypes = useRef(new Map<string, Geometry['type']>())
-  const callbacks = useRef({ onSelect, onCreate, onGeometryEdit })
+  const callbacks = useRef({ onSelect, onCreate, onGeometryEdit, onCancel })
   const busyRef = useRef(busy)
   const interactionActive = useRef(false)
   const pendingLayerSync = useRef(false)
   const currentQuadras = useRef(quadras)
   const syncLayers = useRef<() => void>(() => {})
   useLayoutEffect(() => {
-    callbacks.current = { onSelect, onCreate, onGeometryEdit }
-  }, [onSelect, onCreate, onGeometryEdit])
+    callbacks.current = { onSelect, onCreate, onGeometryEdit, onCancel }
+  }, [onSelect, onCreate, onGeometryEdit, onCancel])
   useLayoutEffect(() => {
     busyRef.current = busy
     currentQuadras.current = quadras
@@ -149,36 +154,60 @@ function AdminDrawingMap({
 
   useEffect(() => {
     const group = L.featureGroup().addTo(map)
+    const labels = L.layerGroup().addTo(map)
     editableGroup.current = group
+    labelsGroup.current = labels
     return () => {
       editableGroup.current = null
+      labelsGroup.current = null
       map.removeLayer(group)
+      map.removeLayer(labels)
     }
   }, [map])
 
   useEffect(() => {
     const group = editableGroup.current
     if (!group) return
+    const syncLabelLayers = (items: Quadra[]) => {
+      const labelLayers = labelsGroup.current
+      if (!labelLayers) return
+      labelLayers.clearLayers()
+      items.forEach((quadra) => {
+        const label = criarIdentificacaoQuadra(map, quadra.geometria, quadra.codigo, quadra.situacao, CORES[quadra.situacao])
+        if (label) labelLayers.addLayer(label)
+      })
+    }
     const sync = () => {
       group.clearLayers()
       idsByLayer.current = new WeakMap()
       originalTypes.current.clear()
       currentQuadras.current.forEach((quadra) => {
         originalTypes.current.set(quadra.id, quadra.geometria.type)
-        const feature = L.geoJSON(quadra.geometria as Geometry)
-        feature.eachLayer((part) => {
-          aplicarEstilo(part, quadra.situacao)
-          idsByLayer.current.set(part, quadra.id)
-          part.on('click', () => callbacks.current.onSelect(quadra.id))
-          group.addLayer(part)
+        const polygons: Geometry[] = quadra.geometria.type === 'MultiPolygon'
+          ? quadra.geometria.coordinates.map((coordinates) => ({ type: 'Polygon', coordinates }) as Polygon)
+          : [quadra.geometria]
+        polygons.forEach((polygon) => {
+          const feature = L.geoJSON(polygon)
+          feature.eachLayer((part) => {
+            aplicarEstilo(part, quadra.situacao)
+            idsByLayer.current.set(part, quadra.id)
+            part.on('click', () => callbacks.current.onSelect(quadra.id))
+            group.addLayer(part)
+          })
         })
       })
+      syncLabelLayers(currentQuadras.current)
       pendingLayerSync.current = false
     }
     syncLayers.current = sync
+    const atualizarRotulos = () => syncLabelLayers(currentQuadras.current)
+    map.on('zoomend', atualizarRotulos)
     if (interactionActive.current || busyRef.current) pendingLayerSync.current = true
     else sync()
-  }, [quadras])
+    return () => {
+      map.off('zoomend', atualizarRotulos)
+    }
+  }, [map, quadras])
 
   useEffect(() => {
     if (!busy && !interactionActive.current && pendingLayerSync.current) syncLayers.current()
@@ -190,7 +219,7 @@ function AdminDrawingMap({
     const control = new L.Control.Draw({
       position: 'topleft',
       draw: {
-        // Leaflet Draw's readableArea references an undeclared variable in strict ESM.
+        // Leaflet Draw's readableArea uses an undeclared variable in strict ESM; this crashes vertexChanged.
         polygon: { allowIntersection: false, showArea: false, maxPoints: 0, repeatMode: false },
         rectangle: false,
         circle: false,
@@ -201,6 +230,7 @@ function AdminDrawingMap({
       edit: { featureGroup: group, remove: false },
     })
     map.addControl(control)
+    let editSaveRequested = false
 
     const created = (event: L.LeafletEvent) => {
       if (busyRef.current) return
@@ -208,6 +238,7 @@ function AdminDrawingMap({
       callbacks.current.onCreate(geometriaDaCamada(layer))
     }
     const edited = (event: L.LeafletEvent) => {
+      editSaveRequested = true
       if (busyRef.current) return
       const changed = new Set<string>()
       ;(event as L.DrawEvents.Edited).layers.eachLayer((layer) => {
@@ -223,7 +254,14 @@ function AdminDrawingMap({
         if (!parts.length) return []
         const type = originalTypes.current.get(id)
         const geometry: Geometry = type === 'MultiPolygon'
-          ? { type: 'MultiPolygon', coordinates: parts.map((part) => (part as Polygon).coordinates) } as MultiPolygon
+          ? {
+            type: 'MultiPolygon',
+            coordinates: parts.flatMap((part) => {
+              if (part.type === 'MultiPolygon') return part.coordinates
+              if (part.type === 'Polygon') return [part.coordinates]
+              return []
+            }),
+          } as MultiPolygon
           : parts[0]
         return [{ id, geometria: geometry }]
       })
@@ -238,20 +276,43 @@ function AdminDrawingMap({
         if (!busyRef.current && pendingLayerSync.current) syncLayers.current()
       }, 0)
     }
+    const doubleClickZoomWasEnabled = map.doubleClickZoom.enabled()
+    const drawingStarted = () => {
+      interactionStarted()
+      if (doubleClickZoomWasEnabled) map.doubleClickZoom.disable()
+    }
+    const drawingStopped = () => {
+      pendingLayerSync.current = true
+      interactionStopped()
+      if (doubleClickZoomWasEnabled) map.doubleClickZoom.enable()
+    }
+    const drawingCancelled = () => callbacks.current.onCancel()
+    const editingStarted = () => {
+      editSaveRequested = false
+      interactionStarted()
+    }
+    const editingStopped = () => {
+      pendingLayerSync.current = true
+      interactionStopped()
+      if (!editSaveRequested) callbacks.current.onCancel()
+    }
 
     map.on(L.Draw.Event.CREATED, created)
     map.on(L.Draw.Event.EDITED, edited)
-    map.on(L.Draw.Event.DRAWSTART, interactionStarted)
-    map.on(L.Draw.Event.DRAWSTOP, interactionStopped)
-    map.on(L.Draw.Event.EDITSTART, interactionStarted)
-    map.on(L.Draw.Event.EDITSTOP, interactionStopped)
+    map.on(L.Draw.Event.DRAWSTART, drawingStarted)
+    map.on(L.Draw.Event.DRAWSTOP, drawingStopped)
+    map.on('draw:canceled', drawingCancelled)
+    map.on(L.Draw.Event.EDITSTART, editingStarted)
+    map.on(L.Draw.Event.EDITSTOP, editingStopped)
     return () => {
       map.off(L.Draw.Event.CREATED, created)
       map.off(L.Draw.Event.EDITED, edited)
-      map.off(L.Draw.Event.DRAWSTART, interactionStarted)
-      map.off(L.Draw.Event.DRAWSTOP, interactionStopped)
-      map.off(L.Draw.Event.EDITSTART, interactionStarted)
-      map.off(L.Draw.Event.EDITSTOP, interactionStopped)
+      map.off(L.Draw.Event.DRAWSTART, drawingStarted)
+      map.off(L.Draw.Event.DRAWSTOP, drawingStopped)
+      map.off('draw:canceled', drawingCancelled)
+      map.off(L.Draw.Event.EDITSTART, editingStarted)
+      map.off(L.Draw.Event.EDITSTOP, editingStopped)
+      if (doubleClickZoomWasEnabled) map.doubleClickZoom.enable()
       map.removeControl(control)
     }
   }, [map])
@@ -279,13 +340,21 @@ function AdminDrawingMap({
 
 export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
   const [quadras, setQuadras] = useState<Quadra[]>([])
+  const [quadrasArquivadas, setQuadrasArquivadas] = useState<Quadra[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [archivedSelectedId, setArchivedSelectedId] = useState<string | null>(null)
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
+  const [deletePhrase, setDeletePhrase] = useState('')
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(true)
   const operationLock = useRef(false)
   const loadVersion = useRef(0)
   const selected = quadras.find((quadra) => quadra.id === selectedId) ?? null
+  const selectedArchived = quadrasArquivadas.find((quadra) => quadra.id === archivedSelectedId) ?? null
+  const deleteTarget = quadras.find((quadra) => quadra.id === deleteTargetId)
+    ?? quadrasArquivadas.find((quadra) => quadra.id === deleteTargetId)
+    ?? null
   const counts = useMemo(() => ({
     total: quadras.length,
     pendente: quadras.filter((quadra) => quadra.situacao === 'pendente').length,
@@ -296,12 +365,17 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
   const carregar = useCallback(async () => {
     const version = ++loadVersion.current
     try {
-      const result = await lerQuadrasAtivas()
+      const [ativas, arquivadas] = await Promise.all([
+        lerQuadrasPorAtividade(true),
+        lerQuadrasPorAtividade(false),
+      ])
       if (version === loadVersion.current) {
-        setQuadras(result)
-        setSelectedId((current) => current && result.some((quadra) => quadra.id === current) ? current : null)
+        setQuadras(ativas)
+        setQuadrasArquivadas(arquivadas)
+        setSelectedId((current) => current && ativas.some((quadra) => quadra.id === current) ? current : null)
+        setArchivedSelectedId((current) => current && arquivadas.some((quadra) => quadra.id === current) ? current : null)
       }
-      return result
+      return ativas
     } finally {
       if (version === loadVersion.current) setLoading(false)
     }
@@ -309,23 +383,15 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
 
   useEffect(() => {
     let active = true
-    const version = ++loadVersion.current
-    void lerQuadrasAtivas()
-      .then((result) => {
-        if (active && version === loadVersion.current) {
-          setQuadras(result)
-          setSelectedId((current) => current && result.some((quadra) => quadra.id === current) ? current : null)
-          setLoading(false)
-        }
-      })
+    void carregar()
       .catch((error: unknown) => {
-        if (active && version === loadVersion.current) {
-          setLoading(false)
-          setMessage(mensagemErroLeitura(error))
-        }
+        if (active) setMessage(mensagemErroLeitura(error))
       })
-    return () => { active = false }
-  }, [])
+    return () => {
+      active = false
+      loadVersion.current += 1
+    }
+  }, [carregar])
 
   useEffect(() => {
     const client = supabase
@@ -344,7 +410,10 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
     }
   }, [carregar])
 
-  const executarAdmin = useCallback(async (operation: () => Promise<void>) => {
+  const executarAdmin = useCallback(async (
+    operation: () => Promise<void>,
+    options: { preserveDataOnRefreshFailure?: boolean } = {},
+  ) => {
     if (operationLock.current) return
     operationLock.current = true
     setBusy(true)
@@ -360,10 +429,12 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
       try {
         await carregar()
       } catch (refreshError: unknown) {
-        loadVersion.current += 1
-        setQuadras([])
-        setSelectedId(null)
-        setMessage((current) => `${current} ${mensagemErroLeitura(refreshError)} A lista foi limpa até uma nova leitura bem-sucedida.`)
+        if (!options.preserveDataOnRefreshFailure) {
+          loadVersion.current += 1
+          setQuadras([])
+          setSelectedId(null)
+        }
+        setMessage((current) => `${current} ${mensagemErroLeitura(refreshError)}${options.preserveDataOnRefreshFailure ? ' Os dados exibidos foram mantidos.' : ' A lista foi limpa até uma nova leitura bem-sucedida.'}`)
       }
     } finally {
       operationLock.current = false
@@ -406,6 +477,7 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
           codigo,
           geometria: created.geometria ?? geometria,
           situacao: 'pendente',
+          ativa: true,
         }])
         setSelectedId(created.id)
         setMessage(`Quadra ${codigo} foi criada, mas a lista não pôde ser recarregada.`)
@@ -448,6 +520,42 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
     })
   }, [carregar, executarAdmin, selected])
 
+  const excluirDefinitivamente = useCallback((target: Quadra) => {
+    const fraseEsperada = `EXCLUIR ${target.codigo}`
+    if (deletePhrase !== fraseEsperada) return
+    if (!window.confirm(`Confirma a exclusão permanente da quadra ${target.codigo}? O registro da quadra, sua situação e todo o histórico associado serão apagados. Esta ação é irreversível.`)) return
+
+    void executarAdmin(async () => {
+      if (!supabase) throw new Error('Supabase não configurado.')
+      let data: boolean | null
+      let error: { code?: string } | null
+      try {
+        const result = await supabase.rpc('admin_excluir_quadra', { p_quadra_id: target.id })
+        data = result.data
+        error = result.error
+      } catch {
+        throw new Error(`A exclusão definitiva da quadra ${target.codigo} não foi confirmada. Verifique os dados atualizados antes de tentar novamente.`)
+      }
+      if (error || data !== true) {
+        throw new Error(`A exclusão definitiva da quadra ${target.codigo} não foi confirmada pelo Supabase.`)
+      }
+
+      setQuadras((current) => current.filter((quadra) => quadra.id !== target.id))
+      setQuadrasArquivadas((current) => current.filter((quadra) => quadra.id !== target.id))
+      setSelectedId((current) => current === target.id ? null : current)
+      setArchivedSelectedId((current) => current === target.id ? null : current)
+      setDeleteTargetId(null)
+      setDeletePhrase('')
+
+      try {
+        await carregar()
+        setMessage(`Quadra ${target.codigo}, sua situação e seu histórico foram excluídos definitivamente.`)
+      } catch {
+        setMessage(`A exclusão definitiva de ${target.codigo} foi confirmada pelo Supabase. Não foi possível recarregar as listas; use “Atualizar dados”.`)
+      }
+    }, { preserveDataOnRefreshFailure: true })
+  }, [carregar, deletePhrase, executarAdmin])
+
   const retryLoad = () => {
     setLoading(true)
     setMessage('')
@@ -473,12 +581,89 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
         </label>
         {selected && <p className="selected-quadra">Selecionada: <strong>{selected.codigo}</strong> · {NOMES[selected.situacao]}</p>}
         <div className="admin-map-actions">
-          <p>Para criar, escolha o polígono: cada clique marca um vértice. Finalize clicando novamente no primeiro ponto ou dando duplo clique no último ponto. Para editar, selecione a ferramenta de edição e ajuste os vértices.</p>
+          <p>Para criar, escolha o polígono: cada clique marca um vértice. Finalize clicando novamente no primeiro ponto ou dando duplo clique no último. A ferramenta desativa ao concluir; clique no polígono novamente para criar outra quadra. Pressione Esc para cancelar. Para editar, selecione a ferramenta de edição, ajuste os vértices e confirme; o X cancela e restaura a geometria salva.</p>
           <button type="button" onClick={arquivar} disabled={!selected || busy || loading}>Arquivar quadra selecionada</button>
+          <button
+            type="button"
+            className="destructive-action"
+            onClick={() => {
+              if (!selected) return
+              setDeleteTargetId(selected.id)
+              setDeletePhrase('')
+              setMessage('')
+            }}
+            disabled={!selected || busy || loading}
+          >
+            Excluir definitivamente selecionada
+          </button>
           <button type="button" onClick={retryLoad} disabled={busy || loading}>Atualizar dados</button>
         </div>
       </div>
-      {(loading || busy) && <p role="status">{loading ? 'Carregando quadras…' : 'Salvando alterações…'}</p>}
+      <div className="admin-archive-tools">
+        <label>
+          Quadras arquivadas
+          <select
+            value={archivedSelectedId ?? ''}
+            onChange={(event) => setArchivedSelectedId(event.target.value || null)}
+            disabled={busy || loading || quadrasArquivadas.length === 0}
+          >
+            <option value="">Selecione uma quadra arquivada</option>
+            {quadrasArquivadas.map((quadra) => <option key={quadra.id} value={quadra.id}>{quadra.codigo}</option>)}
+          </select>
+        </label>
+        <button
+          type="button"
+          className="destructive-action"
+          onClick={() => {
+            if (!selectedArchived) return
+            setDeleteTargetId(selectedArchived.id)
+            setDeletePhrase('')
+            setMessage('')
+          }}
+          disabled={!selectedArchived || busy || loading}
+        >
+          Excluir quadra arquivada definitivamente
+        </button>
+      </div>
+      {quadrasArquivadas.length === 0 && <p className="archived-empty">Nenhuma quadra arquivada disponível.</p>}
+      {deleteTarget && <form
+        className="delete-confirmation"
+        onSubmit={(event) => {
+          event.preventDefault()
+          excluirDefinitivamente(deleteTarget)
+        }}
+      >
+        <h3>Exclusão permanente de {deleteTarget.codigo}</h3>
+        <p>Esta ação é irreversível. Serão apagados o registro da quadra, o registro de situação e todo o histórico associado.</p>
+        <label>
+          Digite exatamente <strong>EXCLUIR {deleteTarget.codigo}</strong> para continuar
+          <input
+            type="text"
+            value={deletePhrase}
+            onChange={(event) => setDeletePhrase(event.target.value)}
+            autoComplete="off"
+            spellCheck={false}
+            disabled={busy}
+            required
+          />
+        </label>
+        <div>
+          <button type="submit" className="destructive-action" disabled={busy || deletePhrase !== `EXCLUIR ${deleteTarget.codigo}`}>
+            {busy ? 'Excluindo…' : 'Confirmar exclusão permanente'}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setDeleteTargetId(null)
+              setDeletePhrase('')
+            }}
+            disabled={busy}
+          >
+            Cancelar
+          </button>
+        </div>
+      </form>}
+      {(loading || busy) && <p role="status">{loading ? 'Carregando quadras…' : 'Processando operação administrativa…'}</p>}
       {message && <p role="alert">{message}</p>}
       <div className="map-card admin-map-card">
         <MapContainer center={CENTRO} zoom={14} zoomControl={false} className="map">
@@ -491,6 +676,7 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
             onSelect={setSelectedId}
             onCreate={criar}
             onGeometryEdit={salvarGeometrias}
+            onCancel={() => setMessage('Operação cancelada. Nenhuma alteração foi salva.')}
           />
         </MapContainer>
       </div>
