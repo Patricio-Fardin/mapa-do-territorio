@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { MapContainer, TileLayer, ZoomControl, useMap } from 'react-leaflet'
+import { AttributionControl, MapContainer, TileLayer, useMap } from 'react-leaflet'
 import L, { type Layer } from 'leaflet'
 import AdminMap from './components/AdminMap'
 import { supabase } from './lib/supabase'
@@ -66,7 +66,7 @@ function PersistedLayers({ quadras, onSelect, layers }: { quadras: Quadra[]; onS
       labels.clearLayers()
       quadras.forEach((quadra) => {
         if (!quadra.geometria) return
-        const label = criarIdentificacaoQuadra(map, quadra.geometria, quadra.codigo, quadra.situacao, CORES[quadra.situacao])
+        const label = criarIdentificacaoQuadra(map, quadra.geometria, quadra.codigo, quadra.situacao, CORES[quadra.situacao], false)
         if (label) labels.addLayer(label)
       })
     }
@@ -677,13 +677,13 @@ function MapPage() {
       </header>
       {(message || localMode) && <p className="notice" role="status">{message || 'Dados locais temporários.'}</p>}
       <section className="map-card">
-        <MapContainer center={centro} zoom={14} zoomControl={false} className="map">
-          <ZoomControl position="bottomright" />
-          <TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+        <MapContainer center={centro} zoom={14} zoomControl={false} touchZoom dragging attributionControl={false} className="map public-map">
+          <AttributionControl position="bottomleft" />
+          <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
           <PersistedLayers quadras={quadras} onSelect={select} layers={layers} />
         </MapContainer>
       </section>
-      <section className="status-panel">
+      <section className="status-panel public-status-panel" aria-label="Indicadores das quadras">
         <div><strong>{counts.total}</strong><span>Total</span></div>
         <div><strong className="gray">{counts.pendente}</strong><span>Pendentes</span></div>
         <div><strong className="green">{counts.concluida}</strong><span>Concluídas</span></div>

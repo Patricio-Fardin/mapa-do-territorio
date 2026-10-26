@@ -161,6 +161,7 @@ export function criarIdentificacaoQuadra(
   codigo: string,
   situacao: SituacaoQuadra,
   cor: string,
+  mostrarCodigo = true,
 ): L.Marker | null {
   const poligonos = extrairPoligonos(geometria)
   const poligono = poligonos.reduce<Poligono | null>((maior, atual) => (
@@ -195,23 +196,30 @@ export function criarIdentificacaoQuadra(
     }
   }
 
-  const largura = Math.max(1, Math.min(150, raio * 1.35, (maxX - minX) * .85))
-  const altura = Math.max(1, Math.min(46, raio * 1.35, (maxY - minY) * .85))
+  const largura = Math.max(1, Math.min(mostrarCodigo ? 150 : 120, raio * (mostrarCodigo ? 1.35 : 1.2), (maxX - minX) * (mostrarCodigo ? .85 : .8)))
+  const altura = Math.max(1, Math.min(mostrarCodigo ? 46 : 30, raio * (mostrarCodigo ? 1.35 : 1.2), (maxY - minY) * (mostrarCodigo ? .85 : .8)))
   const compacto = largura < 48 || altura < 26
-  const fonte = Math.max(1, Math.min(11, largura / 8, altura / (compacto ? 1.5 : 2.8)))
+  const fonte = Math.max(mostrarCodigo ? 1 : 6, Math.min(11, largura / (mostrarCodigo ? 8 : 7), altura / (compacto ? 1.5 : 2.8)))
   const conteudo = document.createElement('span')
-  conteudo.className = compacto ? 'quadra-label quadra-label--compact' : 'quadra-label'
+  conteudo.className = [
+    'quadra-label',
+    mostrarCodigo && compacto ? 'quadra-label--compact' : '',
+    mostrarCodigo ? '' : 'quadra-label--status-only',
+  ].filter(Boolean).join(' ')
   conteudo.style.setProperty('--quadra-label-cor', cor)
   conteudo.style.setProperty('--quadra-label-largura', `${largura}px`)
   conteudo.style.setProperty('--quadra-label-altura', `${altura}px`)
   conteudo.style.setProperty('--quadra-label-fonte', `${fonte}px`)
-  const codigoElement = document.createElement('span')
-  codigoElement.className = 'quadra-label__codigo'
-  codigoElement.textContent = codigo
   const situacaoElement = document.createElement('span')
   situacaoElement.className = 'quadra-label__situacao'
   situacaoElement.textContent = situacao.toLocaleUpperCase('pt-BR')
-  conteudo.append(codigoElement, situacaoElement)
+  if (mostrarCodigo) {
+    const codigoElement = document.createElement('span')
+    codigoElement.className = 'quadra-label__codigo'
+    codigoElement.textContent = codigo
+    conteudo.append(codigoElement)
+  }
+  conteudo.append(situacaoElement)
 
   if (!mapa.getPane('quadraLabels')) {
     const pane = mapa.createPane('quadraLabels')
