@@ -190,7 +190,8 @@ function AdminDrawingMap({
     const control = new L.Control.Draw({
       position: 'topleft',
       draw: {
-        polygon: { allowIntersection: false, showArea: true, maxPoints: 0, repeatMode: false },
+        // Leaflet Draw's readableArea references an undeclared variable in strict ESM.
+        polygon: { allowIntersection: false, showArea: false, maxPoints: 0, repeatMode: false },
         rectangle: false,
         circle: false,
         circlemarker: false,
