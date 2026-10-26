@@ -553,10 +553,12 @@ function MapPage() {
   const [quadras, setQuadras] = useState<Quadra[]>([])
   const [selected, setSelected] = useState<string | null>(null)
   const [message, setMessage] = useState(() => client ? '' : 'Supabase não configurado: usando dados locais temporários.')
+  const [statusFeedback, setStatusFeedback] = useState('')
   const [savingStatus, setSavingStatus] = useState(false)
   const statusLock = useRef(false)
   const loadVersion = useRef(0)
   const layers = useRef(new Map<string, L.Layer[]>())
+  const selectedRef = useRef<string | null>(null)
   const localMode = !client
 
   const carregarQuadras = useCallback(async () => {
@@ -604,7 +606,12 @@ function MapPage() {
     }
   }, [client, carregarQuadras])
 
-  const select = useCallback((id: string) => setSelected(id), [])
+  const select = useCallback((id: string) => {
+    selectedRef.current = id
+    setSelected(id)
+    setStatusFeedback('')
+    setMessage('')
+  }, [])
   const atual = quadras.find((quadra) => quadra.id === selected)
   const counts = useMemo(() => ({
     total: quadras.length,
@@ -629,32 +636,32 @@ function MapPage() {
         if (error) {
           const safeCode = /^[0-9A-Z]{5}$/.test(error.code ?? '') ? ` Código: ${error.code}.` : ''
           await carregarQuadras()
-          setMessage(`O Supabase recusou a atualização da situação.${safeCode}`)
+          setMessage(`Não foi possível salvar a situação. A situação confirmada permanece exibida.${safeCode}`)
           return
         }
         const situacaoConfirmada = situacaoDaRespostaRpc(data)
         if (situacaoConfirmada !== situacao) {
           await carregarQuadras()
-          setMessage('A resposta do Supabase não confirmou a situação solicitada. A situação foi recarregada.')
+          setMessage('O Supabase não confirmou a situação solicitada. A situação persistida foi recarregada.')
           return
         }
         setQuadras((items) => items.map((quadra) => quadra.id === atual.id
           ? { ...quadra, situacao: situacaoConfirmada }
           : quadra))
-        setSelected(null)
+        if (selectedRef.current === atual.id) setStatusFeedback('Situação salva.')
         void carregarQuadras()
         return
       }
       setQuadras((items) => items.map((quadra) => quadra.id === atual.id ? { ...quadra, situacao } : quadra))
       layers.current.get(atual.id)?.forEach((layer) => aplicarEstilo(layer, situacao))
-      setSelected(null)
+      if (selectedRef.current === atual.id) setStatusFeedback('Modo local: alteração não persistida.')
     } catch (error: unknown) {
       if (error instanceof FormatoSituacaoQuadraInvalido) {
         await carregarQuadras()
-        setMessage('O Supabase não confirmou uma situação válida. A situação atual foi recarregada.')
+        setMessage('Não foi possível confirmar a situação. A situação persistida foi recarregada.')
       } else {
         await carregarQuadras()
-        setMessage('Não foi possível confirmar a alteração da situação. Verifique os dados atualizados.')
+        setMessage('Não foi possível salvar a situação. A situação confirmada permanece exibida.')
       }
     } finally {
       statusLock.current = false
@@ -663,7 +670,7 @@ function MapPage() {
   }
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell${atual ? ' app-shell--selection-open' : ''}`}>
       <header className="app-header">
         <div><p className="eyebrow">Mapa de Territórios</p><h1>Alfredo Chaves</h1></div>
         <button onClick={() => { window.history.pushState({}, '', appPath('/admin')); window.dispatchEvent(new PopStateEvent('popstate')) }}>Área admin</button>
@@ -683,14 +690,30 @@ function MapPage() {
         <div><strong className="orange">{counts.refazer}</strong><span>Refazer</span></div>
         <div><strong>{percent}%</strong><span>Conclusão</span></div>
       </section>
-      {atual && <aside className="sheet">
-        <button className="close" onClick={() => setSelected(null)} disabled={savingStatus}>×</button>
-        <strong>{atual.codigo}</strong>
-        {(['concluida', 'pendente', 'refazer'] as Situacao[]).map((status) => (
-          <button key={status} className={`popup-${status}`} onClick={() => void alterar(status)} disabled={savingStatus}>
-            {savingStatus ? 'Salvando…' : NOMES[status]}
-          </button>
-        ))}
+      {atual && <aside className="sheet" aria-labelledby="selected-quadra-title">
+        <div className="sheet-heading">
+          <div>
+            <h2 id="selected-quadra-title">Quadra {atual.codigo}</h2>
+            <p>Situação atual: <strong>{NOMES[atual.situacao]}</strong></p>
+          </div>
+          <button type="button" className="close" onClick={() => { selectedRef.current = null; setSelected(null); setStatusFeedback('') }} aria-label="Fechar painel">×</button>
+        </div>
+        <div className="status-actions" aria-label="Alterar situação da quadra">
+          {(['pendente', 'concluida', 'refazer'] as Situacao[]).map((status) => (
+            <button
+              key={status}
+              type="button"
+              className={`status-button status-button--${status}`}
+              aria-pressed={atual.situacao === status}
+              onClick={() => void alterar(status)}
+              disabled={savingStatus}
+            >
+              {NOMES[status].toLocaleUpperCase('pt-BR')}
+            </button>
+          ))}
+        </div>
+        {savingStatus && <p className="status-feedback" role="status">Salvando situação…</p>}
+        {!savingStatus && statusFeedback && <p className={`status-feedback${localMode ? ' status-feedback--local' : ''}`} role="status">{statusFeedback}</p>}
       </aside>}
       <p className="notice">Visitantes podem colaborar sem cadastro. A área administrativa exige conta autorizada. Não armazene dados pessoais.</p>
     </main>
