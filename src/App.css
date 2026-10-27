@@ -1,6 +1,5 @@
 .app-shell { min-height: 100vh; background: #f4f7f8; color: #193238; }
-.app-header { display: flex; align-items: center; justify-content: space-between; padding: 1rem clamp(1rem, 4vw, 3rem); background: #fff; border-bottom: 1px solid #dce6e8; }
-.eyebrow { margin: 0; color: #287f73; font-size: .8rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.app-header { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .75rem clamp(1rem, 4vw, 3rem); background: #fff; border-bottom: 1px solid #dce6e8; }
 h1 { margin: .15rem 0 0; font-size: clamp(1.35rem, 3vw, 2rem); color: #173d43; }
 .connection-status { color: #287f73; font-size: .85rem; font-weight: 700; }
 .toolbar { display: flex; flex-wrap: wrap; gap: .6rem; padding: .85rem clamp(1rem, 4vw, 3rem); background: #fff; }
@@ -13,17 +12,17 @@ button:hover { border-color: #287f73; }
 .quadra-label { box-sizing: border-box; display: flex; width: var(--quadra-label-largura); height: var(--quadra-label-altura); flex-direction: column; align-items: center; justify-content: center; overflow: hidden; border: 1px solid var(--quadra-label-cor); border-radius: .25rem; background: #ffffffdc; color: var(--quadra-label-cor); font-weight: 800; line-height: 1.05; pointer-events: none; text-align: center; text-shadow: 0 0 2px #fff; }
 .quadra-label__codigo { max-width: 100%; overflow: hidden; font-size: calc(var(--quadra-label-fonte) * .72); text-overflow: clip; white-space: nowrap; }
 .quadra-label__situacao { max-width: 100%; overflow-wrap: anywhere; font-size: var(--quadra-label-fonte); }
-.quadra-label--status-only { border: 0; background: #ffffffed; color: #173d43; }
+.quadra-label--status-only { border: 0; background: rgb(255 255 255 / 76%); color: #173d43; }
 .quadra-label--status-only .quadra-label__situacao { color: #173d43; font-weight: 900; }
 .quadra-label--compact .quadra-label__codigo { display: none; }
 .status-panel { display: grid; grid-template-columns: repeat(5, 1fr); gap: .5rem; margin: 1rem clamp(.75rem, 3vw, 2rem) 0; }
 .status-panel div { display: flex; flex-direction: column; gap: .15rem; padding: .75rem; border: 1px solid #dce6e8; border-radius: .6rem; background: #fff; }
 .status-panel strong { font-size: 1.35rem; }
 .status-panel span { color: #60757a; font-size: .75rem; }
-.public-status-panel { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .4rem; margin: .5rem clamp(.75rem, 3vw, 2rem) 0; }
-.public-status-panel div { min-width: 0; gap: .1rem; padding: .5rem .4rem; text-align: center; }
-.public-status-panel strong { font-size: clamp(1rem, 3vw, 1.25rem); line-height: 1.15; }
-.public-status-panel span { font-size: .7rem; line-height: 1.2; overflow-wrap: anywhere; }
+.public-status-panel { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .45rem; margin: .5rem clamp(.75rem, 3vw, 2rem) 0; }
+.public-status-panel div { min-width: 0; gap: .15rem; padding: .55rem .4rem; text-align: center; }
+.public-status-panel strong { font-size: clamp(1.05rem, 3vw, 1.3rem); line-height: 1.15; }
+.public-status-panel span { font-size: .75rem; line-height: 1.2; overflow-wrap: anywhere; }
 .public-map .leaflet-control-attribution { margin: 0; padding: 2px 5px; background: rgb(255 255 255 / 92%); color: #263a3e; font-size: 10px; line-height: 1.4; }
 .public-map .leaflet-control-attribution a { color: #174f70; }
 .gray { color: #78858a; } .yellow { color: #c18c00; } .green { color: #27844c; } .blue { color: #3477ae; }
@@ -76,9 +75,9 @@ button:hover { border-color: #287f73; }
   .status-panel div:first-child { grid-column: span 2; }
   .public-status-panel { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .35rem; }
   .public-status-panel div:first-child { grid-column: auto; }
-  .public-status-panel div:last-child { grid-column: 1 / -1; flex-direction: row; align-items: center; justify-content: center; gap: .4rem; }
-  .public-status-panel strong { font-size: 1rem; }
-  .public-status-panel span { font-size: .65rem; }
+  .public-status-panel div { padding: .5rem .25rem; }
+  .public-status-panel strong { font-size: 1.05rem; }
+  .public-status-panel span { font-size: .7rem; }
   .admin-status div:first-child { grid-column: auto; }
   .map { min-height: 420px; }
   .sheet { right: .5rem; bottom: calc(.5rem + env(safe-area-inset-bottom)); left: .5rem; width: auto; max-height: min(45vh, 240px); gap: .65rem; padding: .75rem; }
@@ -86,7 +85,6 @@ button:hover { border-color: #287f73; }
   .app-shell .leaflet-bottom.leaflet-right { bottom: calc(11rem + env(safe-area-inset-bottom)); }
   .status-button { min-height: 52px; font-size: .78rem; }
 }
-@media (max-width: 340px) {
+@media (max-width: 380px) {
   .public-status-panel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .public-status-panel div:last-child { grid-column: 1 / -1; }
 }

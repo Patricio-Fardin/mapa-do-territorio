@@ -619,7 +619,6 @@ function MapPage() {
     concluida: quadras.filter((quadra) => quadra.situacao === 'concluida').length,
     refazer: quadras.filter((quadra) => quadra.situacao === 'refazer').length,
   }), [quadras])
-  const percent = counts.total ? Math.round(counts.concluida / counts.total * 100) : 0
 
   const alterar = async (situacao: Situacao) => {
     if (!atual || statusLock.current) return
@@ -672,7 +671,7 @@ function MapPage() {
   return (
     <main className={`app-shell${atual ? ' app-shell--selection-open' : ''}`}>
       <header className="app-header">
-        <div><p className="eyebrow">Mapa de Territórios</p><h1>Alfredo Chaves</h1></div>
+        <h1>Alfredo Chaves</h1>
         <button onClick={() => { window.history.pushState({}, '', appPath('/admin')); window.dispatchEvent(new PopStateEvent('popstate')) }}>Área admin</button>
       </header>
       {(message || localMode) && <p className="notice" role="status">{message || 'Dados locais temporários.'}</p>}
@@ -688,7 +687,6 @@ function MapPage() {
         <div><strong className="gray">{counts.pendente}</strong><span>Pendentes</span></div>
         <div><strong className="green">{counts.concluida}</strong><span>Concluídas</span></div>
         <div><strong className="orange">{counts.refazer}</strong><span>Refazer</span></div>
-        <div><strong>{percent}%</strong><span>Conclusão</span></div>
       </section>
       {atual && <aside className="sheet" aria-labelledby="selected-quadra-title">
         <div className="sheet-heading">
@@ -715,7 +713,6 @@ function MapPage() {
         {savingStatus && <p className="status-feedback" role="status">Salvando situação…</p>}
         {!savingStatus && statusFeedback && <p className={`status-feedback${localMode ? ' status-feedback--local' : ''}`} role="status">{statusFeedback}</p>}
       </aside>}
-      <p className="notice">Visitantes podem colaborar sem cadastro. A área administrativa exige conta autorizada. Não armazene dados pessoais.</p>
     </main>
   )
 }
