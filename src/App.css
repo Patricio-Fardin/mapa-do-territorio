@@ -12,8 +12,10 @@ button:hover { border-color: #287f73; }
 .quadra-label { box-sizing: border-box; display: flex; width: var(--quadra-label-largura); height: var(--quadra-label-altura); flex-direction: column; align-items: center; justify-content: center; overflow: hidden; border: 1px solid var(--quadra-label-cor); border-radius: .25rem; background: #ffffffdc; color: var(--quadra-label-cor); font-weight: 800; line-height: 1.05; pointer-events: none; text-align: center; text-shadow: 0 0 2px #fff; }
 .quadra-label__codigo { max-width: 100%; overflow: hidden; font-size: calc(var(--quadra-label-fonte) * .72); text-overflow: clip; white-space: nowrap; }
 .quadra-label__situacao { max-width: 100%; overflow-wrap: anywhere; font-size: var(--quadra-label-fonte); }
-.quadra-label--status-only { border: 0; background: rgb(255 255 255 / 76%); color: #173d43; }
+.quadra-label--status-only { flex-direction: row; gap: 2px; padding: 0 2px; border: 0; background: rgb(255 255 255 / 76%); color: #173d43; }
 .quadra-label--status-only .quadra-label__situacao { color: #173d43; font-weight: 900; }
+.quadra-label--status-only .quadra-label__simbolo { flex: 0 0 auto; color: #193238; font-size: calc(var(--quadra-label-fonte) * .95); font-weight: 900; line-height: 1; }
+.quadra-label--status-only .quadra-label__situacao { flex: 0 1 auto; overflow: hidden; overflow-wrap: normal; white-space: nowrap; word-break: normal; }
 .quadra-label--compact .quadra-label__codigo { display: none; }
 .status-panel { display: grid; grid-template-columns: repeat(5, 1fr); gap: .5rem; margin: 1rem clamp(.75rem, 3vw, 2rem) 0; }
 .status-panel div { display: flex; flex-direction: column; gap: .15rem; padding: .75rem; border: 1px solid #dce6e8; border-radius: .6rem; background: #fff; }
@@ -25,6 +27,10 @@ button:hover { border-color: #287f73; }
 .public-status-panel span { font-size: .75rem; line-height: 1.2; overflow-wrap: anywhere; }
 .public-map .leaflet-control-attribution { margin: 0; padding: 2px 5px; background: rgb(255 255 255 / 92%); color: #263a3e; font-size: 10px; line-height: 1.4; }
 .public-map .leaflet-control-attribution a { color: #174f70; }
+.public-map-toolbar { display: flex; justify-content: flex-end; padding: 0 clamp(.75rem, 3vw, 2rem) .5rem; }
+.restore-map-view { min-height: 44px; padding: .5rem .7rem; border-color: #9fb3b7; color: #193238; font-size: .8rem; font-weight: 700; }
+.public-status-panel .status-indicator-label { display: flex; align-items: center; justify-content: center; gap: .25rem; color: #344e53; white-space: nowrap; }
+.public-status-panel .status-indicator-icon { color: #193238; font-size: .9rem; font-weight: 900; line-height: 1; }
 .gray { color: #78858a; } .yellow { color: #c18c00; } .green { color: #27844c; } .blue { color: #3477ae; }
 .notice { margin: 1rem clamp(1rem, 4vw, 3rem); color: #60757a; font-size: .85rem; text-align: center; }
 .mode-button { border-color: #287f73; color: #287f73; font-weight: 700; }
@@ -78,11 +84,15 @@ button:hover { border-color: #287f73; }
   .public-status-panel div { padding: .5rem .25rem; }
   .public-status-panel strong { font-size: 1.05rem; }
   .public-status-panel span { font-size: .7rem; }
+  .public-status-panel .status-indicator-label { gap: .2rem; font-size: .68rem; }
+  .public-status-panel .status-indicator-icon { font-size: .8rem; }
+  .restore-map-view { min-height: 44px; padding: .4rem .55rem; font-size: .75rem; }
   .admin-status div:first-child { grid-column: auto; }
   .map { min-height: 420px; }
   .sheet { right: .5rem; bottom: calc(.5rem + env(safe-area-inset-bottom)); left: .5rem; width: auto; max-height: min(45vh, 240px); gap: .65rem; padding: .75rem; }
   .app-shell--selection-open { padding-bottom: calc(11rem + env(safe-area-inset-bottom)); }
-  .app-shell .leaflet-bottom.leaflet-right { bottom: calc(11rem + env(safe-area-inset-bottom)); }
+  .app-shell--selection-open .public-map .leaflet-bottom.leaflet-right,
+  .app-shell--selection-open .public-map .leaflet-bottom.leaflet-left { bottom: calc(11rem + env(safe-area-inset-bottom)); }
   .status-button { min-height: 52px; font-size: .78rem; }
 }
 @media (max-width: 380px) {

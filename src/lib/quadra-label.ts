@@ -7,6 +7,11 @@ type Poligono = Ponto[][]
 type Celula = { x: number; y: number; h: number; distancia: number; maximo: number }
 
 const RAIZ_DOIS = Math.SQRT2
+const STATUS_PUBLICOS: Record<SituacaoQuadra, { texto: string; abreviado: string; simbolo: string }> = {
+  pendente: { texto: 'PENDENTE', abreviado: 'PEND.', simbolo: '◷' },
+  concluida: { texto: 'CONCLUÍDA', abreviado: 'CONC.', simbolo: '✓' },
+  refazer: { texto: 'REFAZER', abreviado: 'REF.', simbolo: '⚠' },
+}
 
 function pontoNoAnel(ponto: Ponto, anel: Ponto[]): boolean {
   let dentro = false
@@ -155,6 +160,13 @@ function extrairPoligonos(geometria: Geometry): Poligono[] {
   return []
 }
 
+function larguraTexto(texto: string, fonte: number): number {
+  const contexto = document.createElement('canvas').getContext('2d')
+  if (!contexto) return texto.length * fonte * .65
+  contexto.font = `900 ${fonte}px ${window.getComputedStyle(document.body).fontFamily}`
+  return contexto.measureText(texto).width
+}
+
 export function criarIdentificacaoQuadra(
   mapa: L.Map,
   geometria: Geometry,
@@ -196,10 +208,33 @@ export function criarIdentificacaoQuadra(
     }
   }
 
-  const largura = Math.max(1, Math.min(mostrarCodigo ? 150 : 120, raio * (mostrarCodigo ? 1.35 : 1.2), (maxX - minX) * (mostrarCodigo ? .85 : .8)))
+  const largura = Math.max(1, Math.min(mostrarCodigo ? 150 : 120, raio * (mostrarCodigo ? 1.35 : 1.6), (maxX - minX) * (mostrarCodigo ? .85 : .8)))
   const altura = Math.max(1, Math.min(mostrarCodigo ? 46 : 30, raio * (mostrarCodigo ? 1.35 : 1.2), (maxY - minY) * (mostrarCodigo ? .85 : .8)))
   const compacto = largura < 48 || altura < 26
-  const fonte = Math.max(mostrarCodigo ? 1 : 6, Math.min(11, largura / (mostrarCodigo ? 8 : 7), altura / (compacto ? 1.5 : 2.8)))
+  let fonte = Math.max(mostrarCodigo ? 1 : 6, Math.min(11, largura / (mostrarCodigo ? 8 : 7), altura / (compacto ? 1.5 : 2.8)))
+  const statusPublico = STATUS_PUBLICOS[situacao]
+  const paddingTexto = 4
+  const larguraDisponivel = largura - paddingTexto
+  let textoPublico = statusPublico.texto
+  let mostrarSimbolo = true
+  if (!mostrarCodigo) {
+    const larguraCompleta = larguraTexto(textoPublico, fonte)
+    const larguraAbreviada = larguraTexto(statusPublico.abreviado, fonte)
+    const larguraSimbolo = fonte
+    const espacoSimbolo = Math.max(1, fonte * .2)
+    if (larguraCompleta + larguraSimbolo + espacoSimbolo > larguraDisponivel) {
+      if (larguraCompleta <= larguraDisponivel) {
+        mostrarSimbolo = false
+      } else {
+        textoPublico = statusPublico.abreviado
+        mostrarSimbolo = larguraAbreviada + larguraSimbolo + espacoSimbolo <= larguraDisponivel
+        if (!mostrarSimbolo && larguraAbreviada > larguraDisponivel) {
+          fonte = Math.min(fonte, Math.max(4, larguraDisponivel / (statusPublico.abreviado.length * .65)))
+        }
+      }
+    }
+    if (largura < 18 || altura < 10) return null
+  }
   const conteudo = document.createElement('span')
   conteudo.className = [
     'quadra-label',
@@ -212,7 +247,13 @@ export function criarIdentificacaoQuadra(
   conteudo.style.setProperty('--quadra-label-fonte', `${fonte}px`)
   const situacaoElement = document.createElement('span')
   situacaoElement.className = 'quadra-label__situacao'
-  situacaoElement.textContent = situacao.toLocaleUpperCase('pt-BR')
+  situacaoElement.textContent = mostrarCodigo ? situacao.toLocaleUpperCase('pt-BR') : textoPublico
+  if (!mostrarCodigo && mostrarSimbolo) {
+    const simboloElement = document.createElement('span')
+    simboloElement.className = 'quadra-label__simbolo'
+    simboloElement.textContent = statusPublico.simbolo
+    conteudo.append(simboloElement)
+  }
   if (mostrarCodigo) {
     const codigoElement = document.createElement('span')
     codigoElement.className = 'quadra-label__codigo'

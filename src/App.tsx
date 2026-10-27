@@ -22,6 +22,20 @@ const centro: [number, number] = [-20.6353, -40.7498]
 
 function aplicarEstilo(layer: Layer, situacao: Situacao) { (layer as L.Path).setStyle({ color: CORES[situacao], fillColor: CORES[situacao], fillOpacity: .42, opacity: .95, weight: 2 }) }
 
+function calcularLimitesQuadras(quadras: Quadra[]): L.LatLngBounds | null {
+  const limites = L.latLngBounds([])
+  quadras.forEach((quadra) => {
+    if (!quadra.geometria) return
+    try {
+      const limiteQuadra = L.geoJSON(quadra.geometria as GeoJSON.GeoJsonObject).getBounds()
+      if (limiteQuadra.isValid()) limites.extend(limiteQuadra)
+    } catch {
+      // Ignora uma geometria inválida e continua usando as geometrias restantes.
+    }
+  })
+  return limites.isValid() ? limites : null
+}
+
 async function lerQuadrasPublicas(client: NonNullable<typeof supabase>): Promise<Quadra[]> {
   const pageSize = 1000
   const quadras: Quadra[] = []
@@ -91,6 +105,17 @@ function PersistedLayers({ quadras, onSelect, layers }: { quadras: Quadra[]; onS
       quadras.forEach((quadra) => currentLayers.delete(quadra.id))
     }
   }, [map, quadras, onSelect, layers])
+  return null
+}
+
+function MapReference({ mapRef }: { mapRef: React.MutableRefObject<L.Map | null> }) {
+  const map = useMap()
+  useEffect(() => {
+    mapRef.current = map
+    return () => {
+      mapRef.current = null
+    }
+  }, [map, mapRef])
   return null
 }
 
@@ -551,6 +576,7 @@ const routePath = () => { const pathname = window.location.pathname; return BASE
 function MapPage() {
   const client = supabase
   const [quadras, setQuadras] = useState<Quadra[]>([])
+  const [quadrasCarregadas, setQuadrasCarregadas] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
   const [message, setMessage] = useState(() => client ? '' : 'Supabase não configurado: usando dados locais temporários.')
   const [statusFeedback, setStatusFeedback] = useState('')
@@ -558,6 +584,8 @@ function MapPage() {
   const statusLock = useRef(false)
   const loadVersion = useRef(0)
   const layers = useRef(new Map<string, L.Layer[]>())
+  const mapRef = useRef<L.Map | null>(null)
+  const initialViewRestored = useRef(false)
   const selectedRef = useRef<string | null>(null)
   const localMode = !client
 
@@ -568,6 +596,7 @@ function MapPage() {
       const result = await lerQuadrasPublicas(client)
       if (version !== loadVersion.current) return
       setQuadras(result)
+      setQuadrasCarregadas(true)
       setMessage('')
     } catch (error: unknown) {
       if (version === loadVersion.current) {
@@ -584,6 +613,7 @@ function MapPage() {
       .then((result) => {
         if (active && version === loadVersion.current) {
           setQuadras(result)
+          setQuadrasCarregadas(true)
           setMessage('')
         }
       })
@@ -619,6 +649,24 @@ function MapPage() {
     concluida: quadras.filter((quadra) => quadra.situacao === 'concluida').length,
     refazer: quadras.filter((quadra) => quadra.situacao === 'refazer').length,
   }), [quadras])
+
+  const restaurarVisaoMapa = () => {
+    const map = mapRef.current
+    if (!map) return
+    const bounds = calcularLimitesQuadras(quadras)
+    if (bounds) {
+      map.fitBounds(bounds.pad(.1), { maxZoom: 15 })
+    } else {
+      map.setView(centro, 14)
+    }
+  }
+
+  useEffect(() => {
+    if (!quadrasCarregadas || initialViewRestored.current || !mapRef.current) return
+    initialViewRestored.current = true
+    const bounds = calcularLimitesQuadras(quadras)
+    if (bounds) mapRef.current.fitBounds(bounds.pad(.1), { maxZoom: 15 })
+  }, [quadras, quadrasCarregadas])
 
   const alterar = async (situacao: Situacao) => {
     if (!atual || statusLock.current) return
@@ -675,8 +723,14 @@ function MapPage() {
         <button onClick={() => { window.history.pushState({}, '', appPath('/admin')); window.dispatchEvent(new PopStateEvent('popstate')) }}>Área admin</button>
       </header>
       {(message || localMode) && <p className="notice" role="status">{message || 'Dados locais temporários.'}</p>}
+      <div className="public-map-toolbar">
+        <button type="button" className="restore-map-view" onClick={restaurarVisaoMapa}>
+          Restaurar visão do mapa
+        </button>
+      </div>
       <section className="map-card">
         <MapContainer center={centro} zoom={14} zoomControl={false} touchZoom dragging attributionControl={false} className="map public-map">
+          <MapReference mapRef={mapRef} />
           <AttributionControl position="bottomleft" />
           <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
           <PersistedLayers quadras={quadras} onSelect={select} layers={layers} />
@@ -684,9 +738,9 @@ function MapPage() {
       </section>
       <section className="status-panel public-status-panel" aria-label="Indicadores das quadras">
         <div><strong>{counts.total}</strong><span>Total</span></div>
-        <div><strong className="gray">{counts.pendente}</strong><span>Pendentes</span></div>
-        <div><strong className="green">{counts.concluida}</strong><span>Concluídas</span></div>
-        <div><strong className="orange">{counts.refazer}</strong><span>Refazer</span></div>
+        <div><strong className="gray">{counts.pendente}</strong><span className="status-indicator-label"><span className="status-indicator-icon" aria-hidden="true">◷</span>Pendentes</span></div>
+        <div><strong className="green">{counts.concluida}</strong><span className="status-indicator-label"><span className="status-indicator-icon" aria-hidden="true">✓</span>Concluídas</span></div>
+        <div><strong className="orange">{counts.refazer}</strong><span className="status-indicator-label"><span className="status-indicator-icon" aria-hidden="true">⚠</span>Refazer</span></div>
       </section>
       {atual && <aside className="sheet" aria-labelledby="selected-quadra-title">
         <div className="sheet-heading">
