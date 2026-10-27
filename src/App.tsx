@@ -19,6 +19,115 @@ type Quadra = { id: string; codigo: string; situacao: Situacao; geometria?: GeoJ
 const CORES: Record<Situacao, string> = { pendente: '#78858a', concluida: '#27ae60', refazer: '#e67e22' }
 const NOMES: Record<Situacao, string> = { pendente: 'Pendente', concluida: 'Concluída', refazer: 'Refazer' }
 const centro: [number, number] = [-20.6353, -40.7498]
+const INTERVALO_ATUALIZACAO_MS = 30_000
+const DADOS_DESATUALIZADOS_MS = 90_000
+const TIMEOUT_RPC_STATUS_MS = 20_000
+const TIMEOUT_RECONCILIACAO_MS = 12_000
+type EstadoConexao = 'loading' | 'available' | 'unavailable' | 'unknown'
+type GravacaoIncerta = {
+  version: 2
+  id: string
+  quadraId: string
+  quadraCodigo: string
+  situacaoSolicitada: Situacao
+  rpcState: 'pending' | 'confirmed' | 'transport-uncertain' | 'resolved'
+  rpcError: boolean
+  message: string
+}
+type GravacaoPersistida = Omit<GravacaoIncerta, 'message'>
+type EstadoPersistencia = 'ready' | 'unavailable' | 'corrupt' | 'coordination-unavailable'
+type ResultadoPersistencia = 'ok' | 'unavailable' | 'corrupt'
+const CHAVE_GRAVACAO_INCERTA = 'mapa-do-territorio:gravacao-incerta:v1'
+const LOCK_GRAVACAO_QUADRAS = 'mapa-do-territorio:gravacao-quadras:v1'
+
+function validarGravacaoPersistida(value: unknown): value is GravacaoPersistida {
+  if (!value || typeof value !== 'object') return false
+  const record = value as Record<string, unknown>
+  const campos = ['id', 'quadraCodigo', 'quadraId', 'rpcError', 'rpcState', 'situacaoSolicitada', 'version']
+  return Object.keys(record).length === campos.length
+    && Object.keys(record).every((campo) => campos.includes(campo))
+    && record.version === 2
+    && typeof record.id === 'string'
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(record.id)
+    && typeof record.quadraId === 'string'
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(record.quadraId)
+    && typeof record.quadraCodigo === 'string'
+    && record.quadraCodigo.trim().length > 0
+    && record.quadraCodigo.length <= 64
+    && (record.situacaoSolicitada === 'pendente' || record.situacaoSolicitada === 'concluida' || record.situacaoSolicitada === 'refazer')
+    && (record.rpcState === 'pending' || record.rpcState === 'confirmed' || record.rpcState === 'transport-uncertain' || record.rpcState === 'resolved')
+    && typeof record.rpcError === 'boolean'
+    && (!['pending', 'confirmed', 'resolved'].includes(record.rpcState) || record.rpcError === false)
+}
+
+function mesmaGravacao(a: GravacaoPersistida, b: GravacaoPersistida): boolean {
+  return a.version === b.version
+    && a.id === b.id
+    && a.quadraId === b.quadraId
+    && a.quadraCodigo === b.quadraCodigo
+    && a.situacaoSolicitada === b.situacaoSolicitada
+    && a.rpcState === b.rpcState
+    && a.rpcError === b.rpcError
+}
+
+function registroPersistivel(record: GravacaoIncerta): GravacaoPersistida {
+  return {
+    version: record.version,
+    id: record.id,
+    quadraId: record.quadraId,
+    quadraCodigo: record.quadraCodigo,
+    situacaoSolicitada: record.situacaoSolicitada,
+    rpcState: record.rpcState,
+    rpcError: record.rpcError,
+  }
+}
+
+function lerGravacaoPersistida(): { status: EstadoPersistencia; gravacao: GravacaoIncerta | null; record: GravacaoPersistida | null } {
+  let raw: string | null
+  try {
+    raw = window.localStorage.getItem(CHAVE_GRAVACAO_INCERTA)
+  } catch {
+    return { status: 'unavailable', gravacao: null, record: null }
+  }
+  if (raw === null) return { status: 'ready', gravacao: null, record: null }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return { status: 'corrupt', gravacao: null, record: null }
+  }
+  if (!validarGravacaoPersistida(parsed)) return { status: 'corrupt', gravacao: null, record: null }
+  return {
+    status: 'ready',
+    record: parsed,
+    gravacao: parsed.rpcState === 'resolved' ? null : {
+      ...parsed,
+      message: `A operação anterior da quadra ${parsed.quadraCodigo} continua não confirmada após recarga. Consulte o estado no servidor antes de tentar outra alteração.`,
+    },
+  }
+}
+
+function gravarPersistencia(record: GravacaoPersistida, expected: GravacaoPersistida | null): ResultadoPersistencia {
+  if (!validarGravacaoPersistida(record)) return 'corrupt'
+  try {
+    const raw = window.localStorage.getItem(CHAVE_GRAVACAO_INCERTA)
+    if (raw !== null) {
+      let existing: unknown
+      try {
+        existing = JSON.parse(raw)
+      } catch {
+        return 'corrupt'
+      }
+      if (!validarGravacaoPersistida(existing) || !expected || !mesmaGravacao(existing, expected)) return 'corrupt'
+    } else if (expected !== null) {
+      return 'corrupt'
+    }
+    window.localStorage.setItem(CHAVE_GRAVACAO_INCERTA, JSON.stringify(record))
+    return 'ok'
+  } catch {
+    return 'unavailable'
+  }
+}
 
 function aplicarEstilo(layer: Layer, situacao: Situacao) { (layer as L.Path).setStyle({ color: CORES[situacao], fillColor: CORES[situacao], fillOpacity: .42, opacity: .95, weight: 2 }) }
 
@@ -40,13 +149,13 @@ async function lerQuadrasPublicas(client: NonNullable<typeof supabase>): Promise
   const pageSize = 1000
   const quadras: Quadra[] = []
   for (let offset = 0; ; offset += pageSize) {
-    const { data, error } = await client
+    const { data, error, status } = await client
       .from('quadras')
       .select('id,codigo,geometria,ativa,situacoes_quadras(situacao)')
       .eq('ativa', true)
       .order('id')
       .range(offset, offset + pageSize - 1)
-    if (error) throw new Error('Não foi possível atualizar as quadras.')
+    if (error) throw { error, status }
     quadras.push(...(data ?? []).map((row) => ({
       id: row.id,
       codigo: row.codigo,
@@ -60,11 +169,44 @@ async function lerQuadrasPublicas(client: NonNullable<typeof supabase>): Promise
 function mensagemErroLeituraPublica(error: unknown): string {
   return error instanceof FormatoSituacaoQuadraInvalido
     ? 'O banco retornou um formato de situação inválido. Nenhuma situação foi presumida.'
-    : 'Não foi possível atualizar as quadras. Verifique a conexão e tente novamente.'
+    : 'Não foi possível carregar as quadras. Tente novamente.'
 }
 
-function situacaoDaRespostaRpc(data: unknown): Situacao {
-  if (data === null || typeof data !== 'object' || !('situacao' in data)) {
+function falhaDeConexao(error: unknown): boolean {
+  const mensagens: string[] = []
+  let atual: unknown = error
+  for (let profundidade = 0; profundidade < 3 && atual; profundidade += 1) {
+    if (atual instanceof Error) {
+      mensagens.push(atual.name, atual.message)
+      atual = atual.cause
+    } else if (typeof atual === 'object') {
+      const objeto = atual as { name?: unknown; message?: unknown; code?: unknown; cause?: unknown; error?: unknown; status?: unknown }
+      if (typeof objeto.status === 'number' && (
+        objeto.status === 0 || objeto.status >= 500 || [408, 425, 429].includes(objeto.status)
+      )) return true
+      if (typeof objeto.name === 'string') mensagens.push(objeto.name)
+      if (typeof objeto.message === 'string') mensagens.push(objeto.message)
+      if (typeof objeto.code === 'string') mensagens.push(objeto.code)
+      atual = objeto.cause ?? objeto.error
+    } else {
+      mensagens.push(String(atual))
+      break
+    }
+  }
+  return mensagens.some((mensagem) => (
+    /^(AbortError|TimeoutError)$/i.test(mensagem.trim())
+    || /\b(failed to fetch|fetch failed|networkerror|load failed|request timed out|timed out)\b/i.test(mensagem)
+  ))
+}
+
+function situacaoDaRespostaRpc(data: unknown, quadraId: string): Situacao {
+  if (
+    data === null
+    || typeof data !== 'object'
+    || !('quadra_id' in data)
+    || data.quadra_id !== quadraId
+    || !('situacao' in data)
+  ) {
     throw new FormatoSituacaoQuadraInvalido()
   }
   return normalizarSituacaoQuadra(data.situacao)
@@ -575,63 +717,373 @@ const routePath = () => { const pathname = window.location.pathname; return BASE
 
 function MapPage() {
   const client = supabase
+  const [persistenciaInicial] = useState(lerGravacaoPersistida)
   const [quadras, setQuadras] = useState<Quadra[]>([])
   const [quadrasCarregadas, setQuadrasCarregadas] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
-  const [message, setMessage] = useState(() => client ? '' : 'Supabase não configurado: usando dados locais temporários.')
+  const [connectionStatus, setConnectionStatus] = useState<EstadoConexao>(client ? 'loading' : 'unknown')
+  const [loadError, setLoadError] = useState('')
+  const [refreshing, setRefreshing] = useState(false)
+  const [noticeDismissed, setNoticeDismissed] = useState(false)
+  const [lastSuccessfulLoadAt, setLastSuccessfulLoadAt] = useState<number | null>(null)
+  const [clock, setClock] = useState(0)
   const [statusFeedback, setStatusFeedback] = useState('')
+  const [statusFeedbackKind, setStatusFeedbackKind] = useState<'success' | 'error'>('success')
   const [savingStatus, setSavingStatus] = useState(false)
+  const [waitingForCoordination, setWaitingForCoordination] = useState(false)
+  const [pendingSave, setPendingSave] = useState<GravacaoIncerta | null>(persistenciaInicial.gravacao)
+  const [storageStatus, setStorageStatus] = useState<EstadoPersistencia>(persistenciaInicial.status)
+  const [coordinationAvailable, setCoordinationAvailable] = useState(
+    typeof navigator !== 'undefined' && Boolean(navigator.locks?.request),
+  )
+  const [reconcilingPendingSave, setReconcilingPendingSave] = useState(false)
+  const [statusFeedbackQuadraId, setStatusFeedbackQuadraId] = useState<string | null>(null)
   const statusLock = useRef(false)
+  const pendingSaveRef = useRef<GravacaoIncerta | null>(persistenciaInicial.gravacao)
+  const persistedRecordRef = useRef<GravacaoPersistida | null>(persistenciaInicial.record)
+  const reconciliationLock = useRef(false)
+  const reconciliationAgainRequested = useRef(false)
+  const reconciliationActionRef = useRef<(allowResolution?: boolean) => Promise<void>>(async () => {})
   const loadVersion = useRef(0)
+  const loadInFlight = useRef<Promise<Quadra[] | null> | null>(null)
+  const hasLoadedData = useRef(false)
+  const lastSuccessfulLoadAtRef = useRef<number | null>(null)
   const layers = useRef(new Map<string, L.Layer[]>())
   const mapRef = useRef<L.Map | null>(null)
   const initialViewRestored = useRef(false)
   const selectedRef = useRef<string | null>(null)
-  const localMode = !client
 
-  const carregarQuadras = useCallback(async () => {
-    if (!client) return
+  const carregarQuadras = useCallback((forcar = false): Promise<Quadra[] | null> => {
+    if (!client) return Promise.resolve(null)
+    if (loadInFlight.current && !forcar) return loadInFlight.current
     const version = ++loadVersion.current
+    if (!hasLoadedData.current) setConnectionStatus('loading')
+    setRefreshing(true)
+    const request = (async (): Promise<Quadra[] | null> => {
+      try {
+        const result = await lerQuadrasPublicas(client)
+        if (version !== loadVersion.current) return null
+        const loadedAt = Date.now()
+        hasLoadedData.current = true
+        lastSuccessfulLoadAtRef.current = loadedAt
+        setLastSuccessfulLoadAt(loadedAt)
+        setQuadras(result)
+        setQuadrasCarregadas(true)
+        setConnectionStatus('available')
+        setLoadError('')
+        setNoticeDismissed(false)
+        return result
+      } catch (error: unknown) {
+        if (version === loadVersion.current) {
+          setConnectionStatus(falhaDeConexao(error) ? 'unavailable' : 'unknown')
+          setLoadError(mensagemErroLeituraPublica(error))
+          setNoticeDismissed(false)
+        }
+        return null
+      } finally {
+        if (version === loadVersion.current) setRefreshing(false)
+      }
+    })()
+    loadInFlight.current = request
+    void request.then(
+      () => { if (loadInFlight.current === request) loadInFlight.current = null },
+      () => { if (loadInFlight.current === request) loadInFlight.current = null },
+    )
+    return request
+  }, [client])
+
+  const atualizarGravacaoIncerta = (gravacao: GravacaoIncerta | null) => {
+    const atual = pendingSaveRef.current
+    const novoRegistro = gravacao
+      ? registroPersistivel(gravacao)
+      : atual
+        ? registroPersistivel({ ...atual, rpcState: 'resolved' })
+        : persistedRecordRef.current
+    const resultado = novoRegistro
+      ? gravarPersistencia(novoRegistro, persistedRecordRef.current)
+      : 'ok'
+    if (resultado !== 'ok') {
+      setStorageStatus(resultado)
+      if (atual) {
+        setPendingSave({
+          ...atual,
+          message: resultado === 'unavailable'
+            ? `O registro local da operação da quadra ${atual.quadraCodigo} não pôde ser atualizado. A gravação permanece bloqueada.`
+            : `O registro local da operação da quadra ${atual.quadraCodigo} mudou ou está inválido. A gravação permanece bloqueada.`,
+        })
+      }
+      return false
+    }
+    pendingSaveRef.current = gravacao
+    persistedRecordRef.current = novoRegistro
+    setPendingSave(gravacao)
+    setStorageStatus('ready')
+    return true
+  }
+
+  const atualizarMensagemGravacaoLocal = (id: string, message: string) => {
+    const atual = pendingSaveRef.current
+    if (!atual || atual.id !== id) return
+    const atualizado = { ...atual, message }
+    pendingSaveRef.current = atualizado
+    setPendingSave(atualizado)
+  }
+
+  const definirFeedback = (quadraId: string, mensagem: string, tipo: 'success' | 'error') => {
+    setStatusFeedbackQuadraId(quadraId)
+    setStatusFeedback(mensagem)
+    setStatusFeedbackKind(tipo)
+  }
+
+  async function reconciliarGravacaoIncerta(permitirResolucao = false): Promise<void> {
+    const pendente = pendingSaveRef.current
+    if (!client || !pendente) return
+    if (reconciliationLock.current) {
+      if (permitirResolucao) reconciliationAgainRequested.current = true
+      return
+    }
+    reconciliationLock.current = true
+    setReconcilingPendingSave(true)
+    const rpcStateAtStart = pendente.rpcState
+    let consulta: Promise<Quadra[] | null> | null = null
+    let timeoutId = 0
     try {
-      const result = await lerQuadrasPublicas(client)
-      if (version !== loadVersion.current) return
-      setQuadras(result)
-      setQuadrasCarregadas(true)
-      setMessage('')
-    } catch (error: unknown) {
-      if (version === loadVersion.current) {
-        setMessage(mensagemErroLeituraPublica(error))
+      consulta = carregarQuadras(true)
+      const resultadoConsulta = await Promise.race([
+        consulta.then((resultado) => ({ kind: 'result' as const, resultado })),
+        new Promise<{ kind: 'timeout' }>((resolve) => {
+          timeoutId = window.setTimeout(() => resolve({ kind: 'timeout' }), TIMEOUT_RECONCILIACAO_MS)
+        }),
+      ])
+      const gravacaoAtual = pendingSaveRef.current
+      if (!gravacaoAtual || gravacaoAtual.id !== pendente.id) return
+      if (resultadoConsulta.kind === 'timeout') {
+        if (loadInFlight.current === consulta) {
+          loadVersion.current += 1
+          loadInFlight.current = null
+          setRefreshing(false)
+        }
+        atualizarMensagemGravacaoLocal(gravacaoAtual.id, `A consulta expirou. A operação da quadra ${pendente.quadraCodigo} continua não confirmada; tente consultar novamente.`)
+        return
+      }
+
+      const resultado = resultadoConsulta.resultado
+      const atualPersistido = resultado?.find((quadra) => quadra.id === pendente.quadraId)
+      if (!resultado || !atualPersistido) {
+        atualizarMensagemGravacaoLocal(
+          gravacaoAtual.id,
+          resultado
+            ? `A quadra ${pendente.quadraCodigo} não foi encontrada. A gravação ainda não foi confirmada; consulte novamente.`
+            : `A consulta da quadra ${pendente.quadraCodigo} falhou. A gravação ainda não foi confirmada; tente consultar novamente.`,
+        )
+        return
+      }
+
+      if (rpcStateAtStart === 'confirmed' && gravacaoAtual.rpcState === 'confirmed') {
+        if (permitirResolucao) {
+          if (!atualizarGravacaoIncerta(null)) return
+        } else {
+          atualizarMensagemGravacaoLocal(
+            gravacaoAtual.id,
+            `A resposta da operação da quadra ${pendente.quadraCodigo} foi recebida. A consulta encontrou ${NOMES[atualPersistido.situacao]}; o registro permanece protegido até a reconciliação coordenada.`,
+          )
+          return
+        }
+        definirFeedback(
+          pendente.quadraId,
+          gravacaoAtual.rpcError
+            ? `A operação da quadra ${pendente.quadraCodigo} retornou erro. Estado persistido atual: ${NOMES[atualPersistido.situacao]}.`
+            : atualPersistido.situacao === pendente.situacaoSolicitada
+              ? `Situação ${NOMES[atualPersistido.situacao]} da quadra ${pendente.quadraCodigo} confirmada no servidor.`
+              : `O servidor confirmou outro estado para a quadra ${pendente.quadraCodigo}: ${NOMES[atualPersistido.situacao]}.`,
+          !gravacaoAtual.rpcError && atualPersistido.situacao === pendente.situacaoSolicitada ? 'success' : 'error',
+        )
+        return
+      }
+
+      atualizarMensagemGravacaoLocal(
+        gravacaoAtual.id,
+        gravacaoAtual.rpcState === 'transport-uncertain'
+          ? `A consulta encontrou ${NOMES[atualPersistido.situacao]} para a quadra ${pendente.quadraCodigo}, mas uma falha de transporte não confirma se a operação original ainda pode produzir efeitos. Alterações continuam bloqueadas; consulte novamente.`
+          : `O servidor mostra ${NOMES[atualPersistido.situacao]} para a quadra ${pendente.quadraCodigo}, mas a resposta da operação original ainda não foi confirmada. Novas alterações permanecem bloqueadas.`,
+      )
+    } catch {
+      const gravacaoAtual = pendingSaveRef.current
+      if (gravacaoAtual?.id === pendente.id) {
+        atualizarMensagemGravacaoLocal(gravacaoAtual.id, `A consulta da quadra ${pendente.quadraCodigo} falhou. A gravação ainda não foi confirmada; tente consultar novamente.`)
+      }
+    } finally {
+      window.clearTimeout(timeoutId)
+      reconciliationLock.current = false
+      setReconcilingPendingSave(false)
+      if (reconciliationAgainRequested.current) {
+        reconciliationAgainRequested.current = false
+        void Promise.resolve().then(() => reconciliarGravacaoIncerta(permitirResolucao))
       }
     }
-  }, [client])
+  }
+
+  async function consultarGravacaoIncerta(): Promise<void> {
+    if (!client || !pendingSaveRef.current) return
+    if (!navigator.locks?.request) {
+      await reconciliarGravacaoIncerta()
+      return
+    }
+    let adquiriuLock = false
+    try {
+      await navigator.locks.request(
+        LOCK_GRAVACAO_QUADRAS,
+        { mode: 'exclusive', ifAvailable: true },
+        async (lock) => {
+          if (!lock) return
+          const persisted = lerGravacaoPersistida()
+          setStorageStatus(persisted.status)
+          if (persisted.status !== 'ready') {
+            if (pendingSaveRef.current) {
+              atualizarMensagemGravacaoLocal(
+                pendingSaveRef.current.id,
+                `O armazenamento da operação da quadra ${pendingSaveRef.current.quadraCodigo} não pode ser verificado. A operação continua bloqueada.`,
+              )
+              adquiriuLock = true
+              await new Promise<void>(() => {})
+            }
+            return
+          }
+          if (persisted.status === 'ready' && !persisted.record && pendingSaveRef.current) {
+            setStorageStatus('corrupt')
+            atualizarMensagemGravacaoLocal(
+              pendingSaveRef.current.id,
+              `O registro da operação da quadra ${pendingSaveRef.current.quadraCodigo} não foi encontrado no armazenamento. A operação permanece bloqueada por segurança.`,
+            )
+            adquiriuLock = true
+            await new Promise<void>(() => {})
+            return
+          }
+          persistedRecordRef.current = persisted.record
+          pendingSaveRef.current = persisted.gravacao
+          setPendingSave(persisted.gravacao)
+          if (persisted.status !== 'ready' || !persisted.gravacao) return
+          adquiriuLock = true
+          await reconciliationActionRef.current(true)
+          if (pendingSaveRef.current) await new Promise<void>(() => {})
+        },
+      )
+    } catch {
+      setCoordinationAvailable(false)
+      setStorageStatus('coordination-unavailable')
+    }
+    if (!adquiriuLock) await reconciliarGravacaoIncerta()
+  }
+
+  useEffect(() => {
+    reconciliationActionRef.current = reconciliarGravacaoIncerta
+  })
+
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== CHAVE_GRAVACAO_INCERTA && event.key !== null) return
+      const persisted = lerGravacaoPersistida()
+      if (persisted.status !== 'ready') {
+        setStorageStatus(persisted.status)
+        if (pendingSaveRef.current) {
+          atualizarMensagemGravacaoLocal(
+            pendingSaveRef.current.id,
+            `O armazenamento da operação da quadra ${pendingSaveRef.current.quadraCodigo} não pode ser verificado. A operação continua bloqueada.`,
+          )
+        }
+        return
+      }
+      if (persisted.status === 'ready' && !persisted.record && pendingSaveRef.current) {
+        setStorageStatus('corrupt')
+        atualizarMensagemGravacaoLocal(
+          pendingSaveRef.current.id,
+          `O registro da operação da quadra ${pendingSaveRef.current.quadraCodigo} desapareceu de outro contexto. A operação permanece bloqueada porque não é possível confirmar o motivo da remoção.`,
+        )
+        return
+      }
+      setStorageStatus(persisted.status)
+      persistedRecordRef.current = persisted.record
+      pendingSaveRef.current = persisted.gravacao
+      setPendingSave(persisted.gravacao)
+      if (!persisted.gravacao && persisted.status === 'ready') void carregarQuadras(true)
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [carregarQuadras])
 
   useEffect(() => {
     if (!client) return
     let active = true
-    const version = ++loadVersion.current
-    void lerQuadrasPublicas(client)
-      .then((result) => {
-        if (active && version === loadVersion.current) {
-          setQuadras(result)
-          setQuadrasCarregadas(true)
-          setMessage('')
+    queueMicrotask(() => {
+      if (!active) return
+      if (!navigator.locks?.request) {
+        setCoordinationAvailable(false)
+        setStorageStatus('coordination-unavailable')
+        void carregarQuadras()
+        return
+      }
+      void navigator.locks.request(LOCK_GRAVACAO_QUADRAS, { mode: 'exclusive' }, async (lock) => {
+        if (!lock || !active) return
+        const persisted = lerGravacaoPersistida()
+        setStorageStatus(persisted.status)
+        if (persisted.status !== 'ready') {
+          if (pendingSaveRef.current) {
+            atualizarMensagemGravacaoLocal(
+              pendingSaveRef.current.id,
+              `O armazenamento da operação da quadra ${pendingSaveRef.current.quadraCodigo} não pode ser verificado. A operação continua bloqueada.`,
+            )
+            await new Promise<void>(() => {})
+          }
+          return
         }
-      })
-      .catch((error: unknown) => {
-        if (active && version === loadVersion.current) {
-          setMessage(mensagemErroLeituraPublica(error))
+        if (!persisted.record && pendingSaveRef.current) {
+          setStorageStatus('corrupt')
+          atualizarMensagemGravacaoLocal(
+            pendingSaveRef.current.id,
+            `O registro da operação da quadra ${pendingSaveRef.current.quadraCodigo} não foi encontrado no armazenamento. A operação permanece bloqueada por segurança.`,
+          )
+          await new Promise<void>(() => {})
+          return
         }
+        persistedRecordRef.current = persisted.record
+        pendingSaveRef.current = persisted.gravacao
+        setPendingSave(persisted.gravacao)
+        if (persisted.status !== 'ready') return
+        if (!persisted.gravacao) {
+          void carregarQuadras()
+          return
+        }
+        await reconciliationActionRef.current(true)
+        if (pendingSaveRef.current) await new Promise<void>(() => {})
+      }).catch(() => {
+        setCoordinationAvailable(false)
+        setStorageStatus('coordination-unavailable')
       })
+    })
     const channel = client
       .channel('mapa-publico')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'situacoes_quadras' }, () => { void carregarQuadras() })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'quadras' }, () => { void carregarQuadras() })
       .subscribe()
-    const refreshTimer = window.setInterval(() => { void carregarQuadras() }, 30_000)
+    const refreshTimer = window.setInterval(() => {
+      setClock(Date.now())
+      void carregarQuadras()
+    }, INTERVALO_ATUALIZACAO_MS)
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return
+      const lastSuccess = lastSuccessfulLoadAtRef.current
+      if (!lastSuccess || Date.now() - lastSuccess >= INTERVALO_ATUALIZACAO_MS) {
+        setClock(Date.now())
+        void carregarQuadras()
+      }
+    }
+    document.addEventListener('visibilitychange', onVisible)
     return () => {
       active = false
       loadVersion.current += 1
+      loadInFlight.current = null
       window.clearInterval(refreshTimer)
+      document.removeEventListener('visibilitychange', onVisible)
       void client.removeChannel(channel)
     }
   }, [client, carregarQuadras])
@@ -640,9 +1092,21 @@ function MapPage() {
     selectedRef.current = id
     setSelected(id)
     setStatusFeedback('')
-    setMessage('')
+    setStatusFeedbackQuadraId(null)
   }, [])
   const atual = quadras.find((quadra) => quadra.id === selected)
+  const dadosRecentes = lastSuccessfulLoadAt !== null && clock - lastSuccessfulLoadAt <= DADOS_DESATUALIZADOS_MS
+  const podeAlterar = Boolean(
+    client
+    && quadrasCarregadas
+    && connectionStatus === 'available'
+    && dadosRecentes
+    && !refreshing
+    && !savingStatus
+    && storageStatus === 'ready'
+    && coordinationAvailable
+    && !pendingSave,
+  )
   const counts = useMemo(() => ({
     total: quadras.length,
     pendente: quadras.filter((quadra) => quadra.situacao === 'pendente').length,
@@ -663,58 +1127,242 @@ function MapPage() {
 
   useEffect(() => {
     if (!quadrasCarregadas || initialViewRestored.current || !mapRef.current) return
-    initialViewRestored.current = true
     const bounds = calcularLimitesQuadras(quadras)
-    if (bounds) mapRef.current.fitBounds(bounds.pad(.1), { maxZoom: 15 })
+    if (!bounds) return
+    mapRef.current.fitBounds(bounds.pad(.1), { maxZoom: 15 })
+    initialViewRestored.current = true
   }, [quadras, quadrasCarregadas])
 
   const alterar = async (situacao: Situacao) => {
-    if (!atual || statusLock.current) return
+    if (!atual || !client || !podeAlterar || statusLock.current || pendingSaveRef.current || storageStatus !== 'ready') return
+    const quadraId = atual.id
+    const quadraCodigo = atual.codigo
+    if (!navigator.locks?.request) {
+      setCoordinationAvailable(false)
+      setStorageStatus('coordination-unavailable')
+      definirFeedback(quadraId, 'Este navegador não oferece coordenação segura entre abas; a alteração não foi enviada.', 'error')
+      return
+    }
+
     statusLock.current = true
     setSavingStatus(true)
-    setMessage('')
-    try {
-      if (client) {
-        const { data, error } = await client.rpc('atualizar_situacao_quadra', {
-          p_quadra_id: atual.id,
-          p_situacao: situacao,
-          p_observacao: null,
-        })
-        if (error) {
-          const safeCode = /^[0-9A-Z]{5}$/.test(error.code ?? '') ? ` Código: ${error.code}.` : ''
-          await carregarQuadras()
-          setMessage(`Não foi possível salvar a situação. A situação confirmada permanece exibida.${safeCode}`)
-          return
-        }
-        const situacaoConfirmada = situacaoDaRespostaRpc(data)
-        if (situacaoConfirmada !== situacao) {
-          await carregarQuadras()
-          setMessage('O Supabase não confirmou a situação solicitada. A situação persistida foi recarregada.')
-          return
-        }
-        setQuadras((items) => items.map((quadra) => quadra.id === atual.id
-          ? { ...quadra, situacao: situacaoConfirmada }
-          : quadra))
-        if (selectedRef.current === atual.id) setStatusFeedback('Situação salva.')
-        void carregarQuadras()
+    setWaitingForCoordination(true)
+    setStatusFeedback('')
+    setStatusFeedbackQuadraId(quadraId)
+
+    const aguardarIncerteza = () => new Promise<void>(() => {})
+    const executarSobLock = async (): Promise<void> => {
+      const persisted = lerGravacaoPersistida()
+      setWaitingForCoordination(false)
+      if (persisted.status !== 'ready') {
+        setStorageStatus(persisted.status)
+        setSavingStatus(false)
+        if (pendingSaveRef.current) await aguardarIncerteza()
         return
       }
-      setQuadras((items) => items.map((quadra) => quadra.id === atual.id ? { ...quadra, situacao } : quadra))
-      layers.current.get(atual.id)?.forEach((layer) => aplicarEstilo(layer, situacao))
-      if (selectedRef.current === atual.id) setStatusFeedback('Modo local: alteração não persistida.')
-    } catch (error: unknown) {
-      if (error instanceof FormatoSituacaoQuadraInvalido) {
-        await carregarQuadras()
-        setMessage('Não foi possível confirmar a situação. A situação persistida foi recarregada.')
-      } else {
-        await carregarQuadras()
-        setMessage('Não foi possível salvar a situação. A situação confirmada permanece exibida.')
+      persistedRecordRef.current = persisted.record
+      if (persisted.gravacao) {
+        pendingSaveRef.current = persisted.gravacao
+        setPendingSave(persisted.gravacao)
+        setSavingStatus(false)
+        await reconciliarGravacaoIncerta(true)
+        if (pendingSaveRef.current) await aguardarIncerteza()
+        return
       }
+      if (pendingSaveRef.current) {
+        setStorageStatus('corrupt')
+        setSavingStatus(false)
+        atualizarMensagemGravacaoLocal(
+          pendingSaveRef.current.id,
+          `O registro da operação da quadra ${pendingSaveRef.current.quadraCodigo} desapareceu antes da gravação. Nenhuma nova alteração foi enviada.`,
+        )
+        return
+      }
+
+      let saveId: string
+      try {
+        saveId = crypto.randomUUID()
+      } catch {
+        setCoordinationAvailable(false)
+        setStorageStatus('coordination-unavailable')
+        setSavingStatus(false)
+        return
+      }
+      const message = `Não foi possível confirmar se a alteração da quadra ${quadraCodigo} foi salva. A gravação permanece pendente de verificação.`
+      const novoRegistro: GravacaoIncerta = {
+        version: 2,
+        id: saveId,
+        quadraId,
+        quadraCodigo,
+        situacaoSolicitada: situacao,
+        rpcState: 'pending',
+        rpcError: false,
+        message,
+      }
+      if (!atualizarGravacaoIncerta(novoRegistro)) {
+        definirFeedback(quadraId, 'Não foi possível proteger localmente esta operação; a alteração não foi enviada.', 'error')
+        setSavingStatus(false)
+        return
+      }
+
+      const marcarGravacaoIncerta = (rpcState: GravacaoIncerta['rpcState'], rpcError = false): boolean => {
+        const pendente = pendingSaveRef.current
+        if (!pendente || pendente.id !== saveId) return false
+        const atualizado = atualizarGravacaoIncerta({
+          ...pendente,
+          rpcState,
+          rpcError,
+          message,
+        })
+        if (atualizado) setConnectionStatus('unknown')
+        return atualizado
+      }
+      const confirmarRespostaRpc = async (
+        resultado: { kind: 'response'; data: unknown; error: unknown; status: number } | { kind: 'exception'; error: unknown },
+      ): Promise<boolean> => {
+        if (resultado.kind === 'exception') {
+          marcarGravacaoIncerta('transport-uncertain')
+          setSavingStatus(false)
+          await reconciliarGravacaoIncerta(true)
+          return false
+        }
+        if (
+          resultado.error
+          || !Number.isInteger(resultado.status)
+          || resultado.status < 200
+          || resultado.status >= 300
+        ) {
+          marcarGravacaoIncerta('transport-uncertain', true)
+          setSavingStatus(false)
+          await reconciliarGravacaoIncerta(true)
+          return false
+        }
+        let situacaoConfirmada: Situacao
+        try {
+          situacaoConfirmada = situacaoDaRespostaRpc(resultado.data, quadraId)
+        } catch {
+          marcarGravacaoIncerta('transport-uncertain')
+          setSavingStatus(false)
+          await reconciliarGravacaoIncerta(true)
+          return false
+        }
+        if (situacaoConfirmada !== situacao) {
+          marcarGravacaoIncerta('transport-uncertain')
+          setSavingStatus(false)
+          await reconciliarGravacaoIncerta(true)
+          return false
+        }
+        if (!marcarGravacaoIncerta('confirmed') || !atualizarGravacaoIncerta(null)) return true
+        setQuadras((items) => items.map((quadra) => quadra.id === quadraId
+          ? { ...quadra, situacao: situacaoConfirmada }
+          : quadra))
+        definirFeedback(quadraId, `Situação da quadra ${quadraCodigo} salva.`, 'success')
+        void carregarQuadras(true)
+        return true
+      }
+
+      const rpcAttempt = client.rpc('atualizar_situacao_quadra', {
+        p_quadra_id: quadraId,
+        p_situacao: situacao,
+        p_observacao: null,
+      }).then(
+        ({ data, error, status }) => ({ kind: 'response' as const, data, error, status }),
+        (error: unknown) => ({ kind: 'exception' as const, error }),
+      )
+      let timeoutId = 0
+      const resultado = await Promise.race([
+        rpcAttempt,
+        new Promise<{ kind: 'timeout' }>((resolve) => {
+          timeoutId = window.setTimeout(() => resolve({ kind: 'timeout' }), TIMEOUT_RPC_STATUS_MS)
+        }),
+      ])
+      window.clearTimeout(timeoutId)
+      if (resultado.kind === 'timeout') {
+        atualizarMensagemGravacaoLocal(saveId, `A gravação da quadra ${quadraCodigo} excedeu o tempo de espera da interface. O resultado segue incerto; a coordenação entre abas permanece bloqueada.`)
+        setSavingStatus(false)
+        void reconciliarGravacaoIncerta(true)
+        const respostaAtrasada = await rpcAttempt
+        const terminal = await confirmarRespostaRpc(respostaAtrasada)
+        if (!terminal) await aguardarIncerteza()
+        return
+      }
+      const terminal = await confirmarRespostaRpc(resultado)
+      if (!terminal) await aguardarIncerteza()
+    }
+
+    try {
+      await navigator.locks.request(LOCK_GRAVACAO_QUADRAS, { mode: 'exclusive', ifAvailable: true }, async (lock) => {
+        setWaitingForCoordination(false)
+        if (!lock) {
+          const persisted = lerGravacaoPersistida()
+          setStorageStatus(persisted.status)
+          if (persisted.status !== 'ready') {
+            if (pendingSaveRef.current) {
+              atualizarMensagemGravacaoLocal(
+                pendingSaveRef.current.id,
+                `O armazenamento da operação da quadra ${pendingSaveRef.current.quadraCodigo} não pode ser verificado. Nenhuma nova gravação foi iniciada.`,
+              )
+            }
+            setSavingStatus(false)
+            return
+          }
+          if (persisted.status === 'ready' && !persisted.record && pendingSaveRef.current) {
+            setStorageStatus('corrupt')
+            atualizarMensagemGravacaoLocal(
+              pendingSaveRef.current.id,
+              `O registro da operação da quadra ${pendingSaveRef.current.quadraCodigo} não foi encontrado no armazenamento. Nenhuma nova gravação foi iniciada.`,
+            )
+            setSavingStatus(false)
+            return
+          }
+          persistedRecordRef.current = persisted.record
+          pendingSaveRef.current = persisted.gravacao
+          setPendingSave(persisted.gravacao)
+          if (!persisted.gravacao && persisted.status === 'ready') {
+            definirFeedback(quadraId, 'Outra aba está coordenando uma operação. Nenhuma nova gravação foi iniciada; tente novamente após a reconciliação.', 'error')
+          }
+          setSavingStatus(false)
+          return
+        }
+        await executarSobLock()
+      })
+    } catch {
+      setCoordinationAvailable(false)
+      setStorageStatus('coordination-unavailable')
+      setSavingStatus(false)
+      setWaitingForCoordination(false)
     } finally {
       statusLock.current = false
       setSavingStatus(false)
+      setWaitingForCoordination(false)
     }
   }
+
+  const mensagemConexao = !client
+    ? 'A configuração do servidor está incompleta. As quadras e alterações não podem ser verificadas ou salvas.'
+    : !coordinationAvailable || storageStatus === 'coordination-unavailable'
+      ? 'A coordenação segura entre abas não está disponível. Alterações de situação estão bloqueadas neste navegador.'
+    : storageStatus === 'unavailable'
+      ? 'O armazenamento local não está disponível. Alterações de situação estão bloqueadas para não perder uma operação incerta.'
+      : storageStatus === 'corrupt'
+        ? 'O registro local de uma operação incerta está inválido ou foi alterado. As alterações permanecem bloqueadas para evitar uma gravação conflitante.'
+    : pendingSave
+      ? 'Uma alteração ainda não foi confirmada. Consulte o estado no servidor antes de tentar outra alteração.'
+    : !quadrasCarregadas && connectionStatus === 'loading'
+      ? 'Carregando quadras…'
+      : !quadrasCarregadas
+        ? 'Não foi possível carregar as quadras. Tente novamente.'
+        : connectionStatus === 'unavailable'
+          ? 'Sem conexão com o servidor. Exibindo os últimos dados disponíveis.'
+          : connectionStatus === 'unknown'
+              ? 'Não foi possível confirmar a atualização. Os últimos dados carregados permanecem visíveis.'
+            : !dadosRecentes
+              ? 'Os dados estão desatualizados. Atualize para confirmar a conexão antes de alterar situações.'
+              : loadError
+                ? 'Não foi possível atualizar as quadras. Os últimos dados carregados permanecem visíveis.'
+                : ''
+  const mostrarAviso = Boolean(mensagemConexao)
+  const podeTentarNovamente = Boolean(client && connectionStatus !== 'loading' && !pendingSave)
 
   return (
     <main className={`app-shell${atual ? ' app-shell--selection-open' : ''}`}>
@@ -722,19 +1370,25 @@ function MapPage() {
         <h1>Alfredo Chaves</h1>
         <button onClick={() => { window.history.pushState({}, '', appPath('/admin')); window.dispatchEvent(new PopStateEvent('popstate')) }}>Área admin</button>
       </header>
-      {(message || localMode) && <p className="notice" role="status">{message || 'Dados locais temporários.'}</p>}
-      <div className="public-map-toolbar">
-        <button type="button" className="restore-map-view" onClick={restaurarVisaoMapa}>
-          Restaurar visão do mapa
-        </button>
-      </div>
-      <section className="map-card">
+      {mostrarAviso && <section className={`connection-notice${connectionStatus === 'unavailable' ? ' connection-notice--offline' : ''}`} role={connectionStatus === 'unavailable' ? 'alert' : 'status'} aria-live={connectionStatus === 'unavailable' ? 'assertive' : 'polite'}>
+        {!noticeDismissed && <p>{mensagemConexao}{loadError && connectionStatus === 'unknown' ? ` ${loadError}` : ''}</p>}
+        {podeTentarNovamente && <button type="button" className="retry-load" onClick={() => { setNoticeDismissed(false); void carregarQuadras(true) }} disabled={refreshing} aria-label="Tentar carregar as quadras novamente">{refreshing ? 'Atualizando…' : 'Tentar novamente'}</button>}
+        {pendingSave && <button type="button" className="retry-load" onClick={() => void consultarGravacaoIncerta()} disabled={reconcilingPendingSave} aria-label={`Consultar novamente o estado não confirmado da quadra ${pendingSave.quadraCodigo}`}>{reconcilingPendingSave ? 'Consultando…' : `Consultar quadra ${pendingSave.quadraCodigo}`}</button>}
+        {quadrasCarregadas && <button type="button" className="dismiss-notice" onClick={() => setNoticeDismissed(true)} aria-label="Fechar aviso de conexão">×</button>}
+      </section>}
+      <section className="map-card public-map-card">
         <MapContainer center={centro} zoom={14} zoomControl={false} touchZoom dragging attributionControl={false} className="map public-map">
           <MapReference mapRef={mapRef} />
           <AttributionControl position="bottomleft" />
           <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
           <PersistedLayers quadras={quadras} onSelect={select} layers={layers} />
         </MapContainer>
+        <button type="button" className="restore-map-view" onClick={restaurarVisaoMapa} aria-label="Restaurar visão do mapa" title="Restaurar visão do mapa">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M12 3v4m0 10v4M3 12h4m10 0h4M8 8l-3.5-3.5M16 8l3.5-3.5M8 16l-3.5 3.5M16 16l3.5 3.5" />
+            <circle cx="12" cy="12" r="4" />
+          </svg>
+        </button>
       </section>
       <section className="status-panel public-status-panel" aria-label="Indicadores das quadras">
         <div><strong>{counts.total}</strong><span>Total</span></div>
@@ -748,7 +1402,7 @@ function MapPage() {
             <h2 id="selected-quadra-title">Quadra {atual.codigo}</h2>
             <p>Situação atual: <strong>{NOMES[atual.situacao]}</strong></p>
           </div>
-          <button type="button" className="close" onClick={() => { selectedRef.current = null; setSelected(null); setStatusFeedback('') }} aria-label="Fechar painel">×</button>
+          <button type="button" className="close" onClick={() => { selectedRef.current = null; setSelected(null); setStatusFeedback(''); setStatusFeedbackQuadraId(null) }} aria-label="Fechar painel">×</button>
         </div>
         <div className="status-actions" aria-label="Alterar situação da quadra">
           {(['pendente', 'concluida', 'refazer'] as Situacao[]).map((status) => (
@@ -758,14 +1412,35 @@ function MapPage() {
               className={`status-button status-button--${status}`}
               aria-pressed={atual.situacao === status}
               onClick={() => void alterar(status)}
-              disabled={savingStatus}
+              disabled={!podeAlterar}
             >
               {NOMES[status].toLocaleUpperCase('pt-BR')}
             </button>
           ))}
         </div>
-        {savingStatus && <p className="status-feedback" role="status">Salvando situação…</p>}
-        {!savingStatus && statusFeedback && <p className={`status-feedback${localMode ? ' status-feedback--local' : ''}`} role="status">{statusFeedback}</p>}
+        {pendingSave?.quadraId === atual.id ? <>
+          <p className="status-feedback status-feedback--warning" role="status">
+            {pendingSave.message}
+          </p>
+          <button type="button" className="reconcile-save-button" onClick={() => void consultarGravacaoIncerta()} disabled={reconcilingPendingSave} aria-label={`Consultar novamente o estado não confirmado da quadra ${pendingSave.quadraCodigo}`}>
+            {reconcilingPendingSave ? 'Consultando situação…' : 'Consultar situação novamente'}
+          </button>
+        </> : pendingSave ? <>
+          <p className="status-feedback status-feedback--warning" role="status">
+            A gravação da quadra {pendingSave.quadraCodigo} continua não confirmada. Novas alterações estão bloqueadas até a reconciliação.
+          </p>
+          <button type="button" className="reconcile-save-button" onClick={() => void consultarGravacaoIncerta()} disabled={reconcilingPendingSave} aria-label={`Consultar novamente o estado não confirmado da quadra ${pendingSave.quadraCodigo}`}>
+            {reconcilingPendingSave ? 'Consultando situação…' : `Consultar quadra ${pendingSave.quadraCodigo}`}
+          </button>
+        </> : !podeAlterar && !savingStatus && <p className="status-feedback status-feedback--warning" role="status">
+          {!client
+            ? 'O servidor não está configurado; as situações não podem ser salvas.'
+            : connectionStatus === 'loading' || refreshing
+              ? 'Aguardando a confirmação dos dados do servidor…'
+              : 'Não é possível alterar situações até que os dados atuais sejam confirmados pelo servidor.'}
+        </p>}
+        {savingStatus && <p className="status-feedback status-feedback--busy" role="status"><span className="status-spinner" aria-hidden="true" />{waitingForCoordination ? 'Aguardando coordenação segura entre abas…' : 'Salvando situação…'}</p>}
+        {!pendingSave && !savingStatus && statusFeedback && statusFeedbackQuadraId === atual.id && <p className={`status-feedback status-feedback--${statusFeedbackKind}`} role={statusFeedbackKind === 'error' ? 'alert' : 'status'}>{statusFeedback}</p>}
       </aside>}
     </main>
   )

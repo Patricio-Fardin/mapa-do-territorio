@@ -1,91 +1,244 @@
 # Mapa de Territórios
 
-Aplicação web para acompanhar quadras territoriais em Alfredo Chaves, Espírito Santo. O frontend usa React, TypeScript, Vite, Leaflet e React-Leaflet; quando configurado, o Supabase fornece autenticação, dados persistidos e operações autorizadas.
+**Documentação técnica atualizada em 27 de outubro de 2026.** Esta descrição foi conferida diretamente no código, nas configurações e nas migrations versionadas neste repositório. Ela descreve o estado local inspecionado; não comprova o estado atual do Supabase remoto nem o que está publicado no GitHub Pages.
 
-## Funcionalidades
+## Identificação e finalidade
 
-- Mapa OpenStreetMap centrado em Alfredo Chaves/ES, com layout responsivo e controles de zoom.
-- Quadras com códigos automáticos no formato `AC-001`, `AC-002` etc.
-- Desenho administrativo de polígonos com múltiplos vértices e edição posterior da geometria. O desenho é concluído pela interação normal do Leaflet Draw; a persistência usa `admin_criar_quadra` e `admin_atualizar_geometria`.
-- Suporte a geometrias GeoJSON `Polygon` e `MultiPolygon`.
-- Etiquetas permanentes no mapa público e administrativo com código e situação. O ponto da etiqueta é calculado dentro do polígono; em quadras pequenas a apresentação é compactada. As etiquetas não interceptam cliques.
-- Situações públicas: **Pendente** (cinza `#78858a`), **Concluída** (verde `#27ae60`) e **Refazer** (laranja `#e67e22`). A alteração confirmada atualiza a situação, cor, etiqueta, contadores e percentual; a situação persistida pelo Supabase é carregada novamente do servidor.
-- Contadores e seleção pública por toque, sem disponibilizar desenho, edição de limites ou exclusão aos visitantes.
-- Atualizações do mapa por leitura do Supabase e Realtime quando habilitado.
+Aplicação web para visualizar e administrar quadras territoriais em Alfredo Chaves, Espírito Santo. O mapa permite acompanhar a situação de cada quadra. A área administrativa autenticada cria quadras, edita geometrias e arquiva ou exclui registros.
 
-## Acesso e autorização
+Perfis declarados no schema local:
 
-- `/` apresenta o mapa público; `/admin` é a área administrativa.
-- O login administrativo recebe alias e senha. O alias é normalizado sem diferenciar maiúsculas/minúsculas e mapeado para `VITE_ADMIN_LOGIN_EMAIL`; a autenticação usa `signInWithPassword`, sem envio de link mágico ou OTP no login.
-- Depois de autenticar e ao recuperar uma sessão existente, a aplicação consulta `public.perfis` e só autoriza o usuário quando `papel = 'admin'`. Falha de consulta ou perfil não administrativo encerra a sessão local.
-- A recuperação de senha é um fluxo separado do login e usa o Supabase Auth. Ela não cria usuários nem concede papel administrativo.
-- Operações estruturais são executadas por RPCs que verificam `public.eh_admin()` no servidor. O cliente frontend não recebe chaves privilegiadas nem permissão de exclusão direta nas tabelas.
+- **Visitante/anônimo:** lê quadras ativas e pode solicitar atualização de situação pela RPC pública `atualizar_situacao_quadra`. As tabelas não concedem escrita direta a `anon`.
+- **Usuário autenticado:** acessa as leituras permitidas e pode entrar na área administrativa somente se a conta estiver mapeada na configuração e `public.perfis.papel` for `admin`.
+- **Administrador:** além da autorização validada no cliente, as RPCs estruturais verificam `public.eh_admin()` no servidor.
+- O enum também define `acompanhamento`, cujo comportamento de produto não está especificado além do papel default no banco.
 
-## Arquivar e excluir definitivamente
+### Funcionalidades implementadas
 
-**Arquivar** chama `admin_arquivar_quadra`, define `ativa = false` e preserva o registro, situação e histórico. A quadra deixa de aparecer no mapa público e permanece localizável na lista administrativa de arquivadas.
+- Mapa público de quadras ativas, contadores, seleção e atualização de situação.
+- Rótulos permanentes adaptáveis ao tamanho do polígono.
+- Autenticação administrativa por alias e senha Supabase; recuperação de senha por link é fluxo separado.
+- Desenho de novas quadras, edição de geometrias, consulta de quadras arquivadas, arquivamento e exclusão definitiva protegida por confirmação.
+- Leituras paginadas do Supabase e atualização por Realtime quando disponível, além de atualização periódica.
+- Proteção local contra operações de situação incertas, coordenada entre abas cooperantes pelo Web Locks API.
 
-**Excluir definitivamente** é uma ação distinta e irreversível. A interface exige digitar exatamente `EXCLUIR <código>` e uma confirmação final. A RPC `admin_excluir_quadra(p_quadra_id uuid)` valida a autorização administrativa no servidor e, na mesma transação, exclui os registros de `public.historico_quadras`, `public.situacoes_quadras` e `public.quadras`, nessa ordem. A interface chama exclusivamente essa RPC e só remove a quadra da lista após confirmação de sucesso. Usuários públicos não têm acesso à ação nem podem executar a RPC sem autorização administrativa.
+Na inspeção de 27/10/2026, o worktree estava na branch `patricio-fardin-login-admin-password`, no commit local `284bbaa` (`Improve public map labels and navigation`), com modificações locais em `README.md`, `src/App.tsx` e `src/App.css`. A referência local de `origin/main` apontava para o mesmo commit no momento da inspeção; não foi feito `fetch`, portanto isso não confirma o estado remoto atual. As modificações locais não estavam commitadas. Build/lint não substituem validação no ambiente remoto.
 
-## Supabase e migrations
+## Tecnologias e ferramentas
 
-As migrations do repositório, em ordem, são:
+Versões declaradas vêm de `package.json`; versões efetivamente instaladas foram lidas localmente com `npm.cmd ls --depth=0` em 27/10/2026. Faixas do manifesto continuam sendo o contrato de instalação; o lockfile fixa a árvore npm reproduzível.
 
-1. `supabase/migrations/20261022000100_initial_schema.sql` — tabelas, tipos, `eh_admin`, situação pública e políticas iniciais.
-2. `supabase/migrations/20261022000200_public_map_admin_policies.sql` — políticas atuais e RPCs de criação, edição de geometria, arquivamento e atualização pública de situação.
-3. `supabase/migrations/20261026132516_admin_excluir_quadra.sql` — RPC de exclusão definitiva e seus privilégios. Conforme informado, esta migration já foi aplicada ao Supabase de produção `bkjcfzotxfapgtxkoswb`; não a reaplique.
+| Tecnologia / ferramenta | Versão declarada | Versão instalada observada | Uso / comprovação |
+|---|---:|---:|---|
+| React | `^19.3.1` | `19.3.1` | UI; `src/App.tsx`, `src/main.tsx` |
+| React DOM | `^19.3.1` | `19.3.1` | Montagem em `#root`; `src/main.tsx` |
+| TypeScript | `~6.0.3` | `6.0.3` | Tipagem e `tsc -b`; `tsconfig*.json`, `package.json` |
+| Vite | `^8.3.4` | `8.3.5` | Servidor e build; `vite.config.ts` |
+| `@vitejs/plugin-react` | `^6.1.2` | `6.1.2` | Plugin React do Vite; `vite.config.ts` |
+| Supabase JS | `^2.118.0` | `2.118.0` | Auth, PostgREST RPC/consultas e Realtime; `src/lib/supabase.ts` |
+| Leaflet | `^1.9.4` | `1.9.4` | Renderização e interação do mapa; `src/App.tsx`, `src/components/AdminMap.tsx` |
+| React-Leaflet | `^5.0.0` | `5.0.0` | Componentes React do mapa; `src/App.tsx`, `src/components/AdminMap.tsx` |
+| Leaflet Draw | `^1.0.4` | `1.0.4` | Desenho e edição administrativa; `src/components/AdminMap.tsx` |
+| Oxlint | `^1.88.0` | `1.89.0` | Análise estática; `npm run lint`, `.oxlintrc.json` |
+| Supabase CLI | `^2.121.0` | `2.121.0` | Dependência de desenvolvimento para tarefas locais/CLI; `package.json` |
+| `@types/leaflet` | `^1.9.22` | `1.9.22` | Tipos; dependências de desenvolvimento |
+| `@types/leaflet-draw` | `^1.0.13` | `1.0.13` | Tipos; dependências de desenvolvimento |
+| `@types/node` | `^24.19.2` | `24.19.2` | Tipos de configuração/script Node |
+| `@types/react` / `@types/react-dom` | `^19.3.0` | `19.3.0` | Tipos React |
+| Node.js | Não declarado em `engines` | `v24.20.0` neste ambiente | Workflow GitHub Actions fixa major 24; `package.json`, `.github/workflows/deploy.yml` |
+| npm | Não declarado em `engines` | `11.19.0` neste ambiente | `package-lock.json` v3 e comandos npm |
+| Git | Não é dependência do app | `2.56.0.windows.2` neste ambiente | Controle de versão |
+| GitHub Actions / Pages | Actions `checkout@v4`, `setup-node@v4`, `configure-pages@v5`, `upload-pages-artifact@v3`, `deploy-pages@v4` | Runner `ubuntu-latest`; versões indicadas no YAML | `.github/workflows/deploy.yml` |
+| OpenStreetMap | Serviço externo, sem versão npm | Não aplicável | Tiles e atribuição em `src/App.tsx` |
+| Web Locks, `localStorage`, evento `storage` | APIs do navegador | Depende do navegador | Coordenação/persistência em `src/App.tsx`; sem `BroadcastChannel` |
 
-A migration de exclusão já foi aplicada ao projeto Supabase de produção `bkjcfzotxfapgtxkoswb`, conforme confirmação do proprietário. A interface que oferece a ação deve ser publicada depois da migration. Não reaplique essa migration. Antes de qualquer outra alteração de banco, confira o projeto e o histórico remoto e exija uma prévia que liste somente as migrations pretendidas. Este repositório não aplica migrations automaticamente.
+Não há ESLint, biblioteca de ícones, framework de formulários, biblioteca de validação de schema ou suíte de testes declarados no manifesto. Os símbolos usados nos rótulos são texto/Unicode e o controle de restauração tem SVG inline.
 
-Para desenvolvimento local, copie `.env.example` para `.env.local` e configure somente valores públicos:
+## Arquitetura e arquivos
 
 ```text
-VITE_SUPABASE_URL=
-VITE_SUPABASE_PUBLISHABLE_KEY=
+.
+├── .github/workflows/deploy.yml
+├── scripts/
+│   ├── copy-404.mjs
+│   └── set-admin-password.mjs
+├── src/
+│   ├── assets/                 # SVGs de template e hero.png
+│   ├── components/AdminMap.tsx # Mapa e operações administrativas
+│   ├── lib/
+│   │   ├── quadra-label.ts     # Cálculo e renderização de rótulos
+│   │   ├── quadra-status.ts    # Validação/normalização da situação
+│   │   └── supabase.ts         # Cliente com configuração VITE pública
+│   ├── App.tsx                 # Rotas, autenticação e mapa público
+│   ├── App.css                # Estilos da aplicação/mapas
+│   ├── index.css              # Reset e estilos globais básicos
+│   └── main.tsx               # React StrictMode e montagem
+├── supabase/
+│   ├── config.toml             # Configuração de desenvolvimento local
+│   └── migrations/             # Schema, RLS e funções versionadas
+├── .env.example
+├── .gitignore
+├── .oxlintrc.json
+├── index.html
+├── package.json
+├── package-lock.json
+├── PROMPT_RECONSTRUCAO_MAPA.md
+├── PROMPT_RESTAURACAO.md       # Instruções históricas de restauração do projeto atual
+├── tsconfig*.json
+└── vite.config.ts
+```
+
+- `src/App.tsx`: roteamento leve por `BASE_URL` entre mapa público e `/admin`, login/recuperação, leitura pública, estados/contadores e transação da situação, incluindo coordenação e persistência de incerteza.
+- `src/components/AdminMap.tsx`: lista ativa/arquivada, desenho Leaflet Draw, edição de Polygon/MultiPolygon, confirmação de autorização e chamadas de RPC estruturais.
+- `src/lib/quadra-label.ts`: calcula um ponto interno por busca aproximada de maior distância às bordas, ajusta dimensões do rótulo conforme o polígono/zoom e cria marcador não interativo.
+- `src/lib/quadra-status.ts`: aceita apenas `pendente`, `concluida` e `refazer`; relação ausente/vazia vira `pendente`, mas formas ambíguas/inválidas lançam erro.
+- `src/lib/supabase.ts`: cria cliente somente quando URL e chave publicável existem; sessão persiste e renova token automaticamente. A chave é pública e não deve ser privilegiada.
+- `vite.config.ts`: `base` de publicação `/mapa-do-territorio/` e plugin React.
+- `src/main.tsx`: renderiza `<App />` em `<StrictMode>`.
+- `scripts/copy-404.mjs`: copia `dist/index.html` para `dist/404.html` para fallback de rota do Pages. O build depende desse script; não o substitua por assumptions sobre o servidor.
+- `supabase/config.toml`: parâmetros locais (por exemplo, Postgres major 17, portas e redirects de desenvolvimento). `project_id = "Mapa_interativo"` é identificador de configuração local, não prova qual projeto remoto será usado. O arquivo referencia `./seed.sql`, mas não há `supabase/seed.sql` no inventário atual.
+- `PROMPT_RESTAURACAO.md` é um documento anterior para restaurar/operar o projeto existente. `PROMPT_RECONSTRUCAO_MAPA.md` é a especificação independente para uma reconstrução futura; nenhum dos dois substitui a necessidade de confirmar ambiente e autorização.
+
+## Mapa público
+
+- A aplicação usa `https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png`, com atribuição visível a OpenStreetMap Contributors e link para copyright.
+- Centro inicial: Alfredo Chaves/ES (`[-20.6353, -40.7498]`), zoom 14. Após carregar os dados, tenta ajustar o mapa aos limites das geometrias; existe botão flutuante acessível para restaurar a visualização.
+- Lê apenas quadras `ativa = true`, selecionando `id`, `codigo`, `geometria`, `ativa` e relação `situacoes_quadras(situacao)`. Faz paginação em blocos de 1000, ordenada por `id`; Realtime e intervalo de 30 segundos solicitam atualizações. O cliente ignora leituras antigas com sequência/versionamento local.
+- Geometrias GeoJSON suportadas na aplicação e validador do banco: `Polygon` e `MultiPolygon`. O banco mantém `geometria` como JSONB.
+- Clicar em polígono seleciona a quadra e abre painel com código, situação e ações de situação. O mapa público não oferece criação, edição de geometria, arquivamento ou exclusão.
+- Situações e cores do polígono: `pendente` / **Pendente** (`#78858a`), `concluida` / **Concluída** (`#27ae60`), `refazer` / **Refazer** (`#e67e22`). Indicadores incluem `◷`, `✓` e `⚠`. Contadores exibem total e quantidade em cada estado.
+- Etiquetas não capturam cliques. No mapa público priorizam situação e símbolo, abreviando ou omitindo detalhes em polígonos pequenos; no administrativo também mostram o código quando há espaço.
+- CSS reduz alturas/organiza contadores e posiciona o painel de seleção acima das margens seguras em telas móveis. O controle para restaurar a visualização fica no canto do mapa; `prefers-reduced-motion` desativa animação do indicador de carregamento.
+- Estados de inicialização, dados desatualizados, falha/indisponibilidade de conexão, armazenamento indisponível/corrompido e operação pendente são comunicados. Sem Supabase configurado, operações e autorização não são simuladas com dados locais.
+
+## Área administrativa e autenticação
+
+- Caminho: `/mapa-do-territorio/admin` no Pages e `/admin` no caminho servido pela base local. `App` escolhe a página usando `BASE_URL` e `history/popstate`; não há roteador externo.
+- Login pede alias e senha. Alias é comparado após `trim()` sem diferenciar caixa e mapeado para `VITE_ADMIN_LOGIN_EMAIL`; a autenticação é `signInWithPassword`. Não há OTP/link mágico no caminho de login.
+- Na montagem, consulta sessão existente via `getSession`; após login/recuperação, valida usuário e consulta `public.perfis` por `user_id`, exigindo `papel === 'admin'`. Erro/perfil não autorizado tenta `signOut({ scope: 'local' }`. As permissões reais também dependem de RLS/RPC no banco.
+- “Esqueci minha senha” é fluxo separado: `resetPasswordForEmail`, callback de recuperação, validação do usuário/perfil e atualização de senha com Auth. Isso envia link; não é login sem e-mail.
+- A área admin carrega quadras ativas e arquivadas, contadores e status, atualiza por Realtime e intervalo de 30s. Um lock local impede cliques operacionais duplicados; isso não substitui controles transacionais no servidor.
+- Desenho de polígono impede interseções no Leaflet Draw conforme configuração, permite múltiplos vértices e é cancelável. Antes de criar, compara geometrias ativas; gera o próximo código com base nos códigos lidos. A unicidade final depende também da constraint do banco.
+- Edição de geometria pode salvar mais de uma quadra em chamadas sequenciais; se houver falha parcial, mensagem informa quantas já foram salvas e recarrega dados.
+- Arquivamento exige confirmação nativa do navegador; deixa de aparecer no público e preserva histórico conforme a RPC.
+- Exclusão permanente exige digitar exatamente `EXCLUIR <código>` e confirmar em janela nativa. A interface chama `admin_excluir_quadra`; não executa `.delete()` direto. É destrutiva e remove histórico/situação/quadra segundo a migration local.
+
+## Dados, RLS e RPCs documentados no repositório
+
+Os fatos desta seção descrevem as três migrations versionadas, na ordem abaixo. Não demonstram que foram aplicadas, nem que continuam iguais no Supabase remoto.
+
+### Tipos e tabelas
+
+| Objeto | Colunas / significado verificado |
+|---|---|
+| `public.app_role` | Enum `admin`, `acompanhamento`. |
+| `public.situacao_quadra` | Enum `pendente`, `concluida`, `refazer`. |
+| `public.tipo_evento_quadra` | Enum `criada`, `situacao_alterada`, `observacao_alterada`, `geometria_alterada`, `arquivada`. |
+| `public.perfis` | `user_id uuid` PK/FK `auth.users(id)` com `ON DELETE CASCADE`; `papel app_role NOT NULL DEFAULT acompanhamento`; `created_at timestamptz`. |
+| `public.quadras` | `id uuid` PK default UUID; `codigo text` unique e regex `^AC-[0-9]{3,}$`; `geometria jsonb` com tipo Polygon/MultiPolygon; `ativa boolean`; `created_at`, `created_by` FK Auth com `ON DELETE SET NULL`, `updated_at`. Índice em `ativa`. |
+| `public.situacoes_quadras` | `quadra_id uuid` PK/FK quadra `ON DELETE RESTRICT`; `situacao` enum default pendente; `observacao text` default vazio, máximo 2000 caracteres; `updated_at`, `updated_by` FK Auth `ON DELETE SET NULL`. |
+| `public.historico_quadras` | `id uuid` PK; `quadra_id` FK quadra `ON DELETE RESTRICT`; `tipo_evento`; situações anterior/nova nullable; `detalhes jsonb`; `created_at`; `user_id` FK Auth `ON DELETE SET NULL`. Índice por quadra/data descendente. |
+
+### Funções
+
+| Função | Contrato local |
+|---|---|
+| `eh_admin()` | Retorna boolean consultando `perfis` para `auth.uid()` e papel `admin`; `SECURITY DEFINER`, `search_path = ''`. |
+| `atualizar_situacao_quadra(p_quadra_id uuid, p_situacao public.situacao_quadra, p_observacao text DEFAULT NULL)` | Retorna JSONB com `quadra_id`, situação, observação e `updated_at`; valida quadra ativa, bloqueia a linha durante alteração, atualiza situação/observação e grava histórico. A migration 002 concede execução a `anon, authenticated` e nega escrita direta nas tabelas. A função não contém chave de idempotência nem registro consultável por ID da operação. |
+| `geometria_geojson_valida(p_geometria jsonb)` | Valida tipo Polygon/MultiPolygon, arrays/aneis/pontos e faixas de longitude/latitude conforme implementação da migration 002. |
+| `admin_criar_quadra(p_codigo text, p_geometria jsonb)` | Exige `eh_admin`, valida código/geometria, insere quadra, situação inicial pendente e evento criado; retorna objeto JSON com dados da quadra. |
+| `admin_atualizar_geometria(p_quadra_id uuid, p_geometria jsonb)` | Exige `eh_admin`, valida geometria, atualiza somente quadra ativa, grava evento; retorna quadra atualizada. |
+| `admin_arquivar_quadra(p_quadra_id uuid)` | Exige `eh_admin`, define `ativa = false`, grava evento e retorna boolean. |
+| `admin_excluir_quadra(p_quadra_id uuid)` | Migration 003: exige sessão e `eh_admin`, bloqueia quadra e exclui histórico, situação e quadra dentro da transação; retorna boolean. Grants locais removem execução de `public` e `anon`, concedendo a `authenticated`. |
+
+### RLS e permissões finais representadas pelas migrations
+
+- RLS é habilitada em `perfis`, `quadras`, `situacoes_quadras` e `historico_quadras`.
+- A migration 002 deixa quadras/situações ativas legíveis para `anon` e `authenticated`; quadras arquivadas dependem de `eh_admin()`. Histórico fica legível a administradores autenticados.
+- `perfis` tem policy de leitura própria ou admin da migration inicial; permissões efetivas são a composição de grants, policies e alterações subsequentes.
+- `anon` não recebe escrita direta nas tabelas. A migration 002 revoga escrita de `anon, authenticated`; operações são feitas por RPCs. Funções administrativas são executáveis por `authenticated`; `atualizar_situacao_quadra` é pública conforme concessão da migration 002.
+- Não há política de escrita direta de cliente no histórico. A atomicidade de operações estruturais depende da implementação real da RPC/Postgres.
+
+### Migrations e estado remoto
+
+1. `supabase/migrations/20261022000100_initial_schema.sql`
+2. `supabase/migrations/20261022000200_public_map_admin_policies.sql`
+3. `supabase/migrations/20261026132516_admin_excluir_quadra.sql`
+
+O README anterior registrava a afirmação de que a terceira migration havia sido aplicada ao projeto de produção `bkjcfzotxfapgtxkoswb`, conforme informação atribuída ao proprietário. **Essa afirmação não foi verificada no Supabase durante a atualização desta documentação.** Confirme o projeto remoto e o histórico de migrations com o responsável antes de qualquer operação. `supabase/config.toml`, migrations locais e arquivos temporários do CLI não são evidência suficiente do schema/estado remoto atual. Não há migração automática durante build/deploy.
+
+## Segurança e consistência de situação
+
+O comportamento a seguir foi conferido em `src/App.tsx` e migrations locais em 27/10/2026:
+
+1. A alteração cria UUID v4 local e persiste registro versão 2 (`quadraId`, código, situação solicitada, estado e indicador de erro) no `localStorage` antes de iniciar `atualizar_situacao_quadra`.
+2. Web Locks exclusivo com nome comum coordena abas cooperantes da mesma origem/perfil. O lock abrange revalidação do registro, gravação local, chamada RPC e manutenção da incerteza/resolução. Sem suporte ou falha, a aplicação bloqueia a alteração. Há um único registro global; a incerteza de uma quadra bloqueia operações em todas as quadras nesse navegador.
+3. Estados persistidos: `pending` (RPC iniciada/sem resultado), `transport-uncertain` (resposta/erro não conclusivo), `confirmed` (resposta positiva validada pela aplicação) e `resolved` (tombstone). Só a resposta 2xx sem erro, com `quadra_id` igual ao solicitado e situação válida igual à solicitada, pode avançar para `confirmed`. Erros HTTP, exceções, timeout, resposta incompleta ou estado divergente não são prova terminal.
+4. A leitura da situação atual nunca resolve `pending`/`transport-uncertain`. Para `confirmed`, reconciliação pode gravar `resolved` depois de ler a quadra; o caminho de sucesso pode gravar tombstone diretamente após validar a resposta RPC. O tombstone permanece no armazenamento e só é substituído sob lock após comparar identidade/conteúdo esperado.
+5. Registro corrompido, versão antiga/desconhecida, falha de leitura/gravação, perda inesperada do registro e indisponibilidade da coordenação bloqueiam novas gravações. Registros diferentes da versão 2 não são migrados/apagados automaticamente. Consulta repetível informa o estado observado, mas não libera operação incerta.
+6. Timeout da interface não cancela a RPC. Resposta atrasada ainda é processada; erro de transporte pode deixar lock/registro pendente. Não há repetição automática nem fila offline.
+
+**Limite importante:** Web Locks cobre apenas abas cooperantes na mesma origem/perfil enquanto o navegador e o armazenamento persistem. Não coordena dispositivos/navegadores diferentes, software antigo não cooperante, nem resiste à limpeza/evicção do `localStorage`. Depois de uma resposta perdida, o cliente não consegue provar que a execução remota terminou ou não ocorrerá tardiamente. Resolução definitiva exige suporte do servidor — por exemplo, chave idempotente/identificador persistido e API para consultar o resultado — inexistente nas migrations locais atuais. Não apresente uma leitura isolada como confirmação do término da RPC.
+
+## Configuração, desenvolvimento e publicação
+
+### Ambiente
+
+`.env.example` contém valores demonstrativos, não credenciais:
+
+```dotenv
+VITE_SUPABASE_URL=https://seu-projeto.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=sua-chave-publica-do-supabase
 VITE_ADMIN_USERNAME=admin
-VITE_ADMIN_LOGIN_EMAIL=
+VITE_ADMIN_LOGIN_EMAIL=admin@example.com
 ```
 
-`VITE_ADMIN_USERNAME` é opcional (padrão `admin`) e `VITE_ADMIN_LOGIN_EMAIL` é o e-mail público de mapeamento da conta Auth já associada ao perfil administrador. Essas variáveis `VITE_*` ficam visíveis no bundle e não podem conter senhas, service role ou outras chaves secretas. `.env.local` é ignorado pelo Git. Para GitHub Pages, as mesmas variáveis públicas são configuradas como Actions Variables consumidas por `.github/workflows/deploy.yml`.
+Copie para `.env.local` e substitua pelas configurações públicas corretas. `VITE_ADMIN_USERNAME` tem default `admin`; `VITE_ADMIN_LOGIN_EMAIL` mapeia o alias para a conta Auth existente. Variáveis `VITE_*` são incluídas no bundle: nunca use senha, `service_role`, chave privada ou credencial privilegiada. `.env.local`, `.env` e `*.local` são ignorados por `.gitignore`; não os leia para documentação nem os inclua em commits.
 
-Não crie nem substitua a conta administrativa ou seu perfil para configurar o projeto. Não altere permissões ou dados remotos fora de uma mudança autorizada e revisada.
+### Comandos existentes
 
-## Desenvolvimento e verificações
-
-No Windows PowerShell, a partir da raiz do repositório:
+O workflow fixa Node 24; `package.json` não declara faixa `engines`. O ambiente inspecionado tinha Node `v24.20.0` e npm `11.19.0`. No Windows PowerShell, na raiz:
 
 ```powershell
-npm.cmd install
+npm.cmd ci
 npm.cmd run dev
-```
-
-Abra `http://localhost:5173/mapa-do-territorio/`; a rota administrativa local é `/mapa-do-territorio/admin`. Para verificar alterações:
-
-```powershell
 npm.cmd run build
 npm.cmd run lint
 git diff --check
+npm.cmd run preview
 ```
 
-O build executa TypeScript, Vite e `scripts/copy-404.mjs`. O lint usa Oxlint. Antes de publicar, revise o diff e o status, confirme que nenhum arquivo de ambiente, credencial ou alteração alheia foi incluído e aguarde o workflow GitHub Actions de build e deploy.
+O Vite local serve em `http://localhost:5173/mapa-do-territorio/`; admin em `/mapa-do-territorio/admin`. Não há script `test` nem arquivos de teste `*.test.*`/`*.spec.*` no inventário. Não invente `npm test` como comando funcional sem adicionar deliberadamente infraestrutura.
 
-## Testes e limitações
+O script `admin:set-password` (`npm.cmd run admin:set-password -- <UUID>`) está declarado, mas altera senha: exige UUID de usuário Auth existente como argumento, `SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY` no ambiente local seguro, e senha/confirmação digitadas sem eco. **Não execute sem pedido explícito e confirmação do proprietário sobre o usuário e a ação.** Nunca armazene a chave em `VITE_*` ou documente seu valor.
 
-Build e lint locais não substituem testes reais de autenticação, privilégios ou transações no banco. Não teste exclusão no Supabase de produção e não use quadras reais como dados de teste. Verifique criação, edição e situações no mapa com dados de desenvolvimento; para testar a RPC de exclusão, use um projeto isolado com dados descartáveis e confirme que falhas revertem a operação. Não declare a exclusão remota testada sem uma execução autorizada e verificável.
+### GitHub Pages
 
-Para restaurar o projeto com segurança, siga [`PROMPT_RESTAURACAO.md`](PROMPT_RESTAURACAO.md). O documento inclui a estrutura, migrations, checagens de projeto e cuidados para não apagar dados.
+`.github/workflows/deploy.yml` inicia no push a `main` ou `workflow_dispatch`, usa Ubuntu, Node 24 e `npm ci`; faz `npm run build`, configura Pages, carrega `dist` e publica. O build precisa das Actions Variables públicas `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_ADMIN_USERNAME` e `VITE_ADMIN_LOGIN_EMAIL`. URL do site configurada no projeto: `https://patricio-fardin.github.io/mapa-do-territorio/`. A configuração é declarativa; não prova que Pages esteja habilitado ou que uma execução esteja verde. Não há script de publicação local: o deploy é feito pelo workflow.
 
-## Estrutura principal
+## Limitações, pendências e validação necessária
 
-- `src/App.tsx` — mapa público, autenticação e recuperação administrativa, situação e contadores.
-- `src/components/AdminMap.tsx` — desenho, edição, arquivamento e exclusão administrativa.
-- `src/lib/quadra-label.ts` — cálculo e renderização de etiquetas dentro dos polígonos.
-- `src/lib/quadra-status.ts` — validação e normalização de situações.
-- `src/lib/supabase.ts` — cliente Supabase configurado pelas variáveis públicas.
-- `src/App.css` e `src/index.css` — estilos e responsividade.
-- `supabase/migrations/` — esquema, políticas e RPCs versionadas.
-- `.github/workflows/deploy.yml` — build e publicação no GitHub Pages.
+### Limitações atuais comprovadas
 
-## Publicação
+- Sem mecanismo servidor de idempotência/consulta de operações, uma RPC incerta pode continuar bloqueada sem resolução automática; a leitura de estado não prova que cessaram efeitos remotos.
+- A persistência é local a navegador/perfil e pode ser perdida por limpeza ou evicção.
+- Registro incompatível/corrompido é fail-closed, mas não há ferramenta de reparo seguro na interface.
+- O estado final do Supabase remoto, grants/RLS efetivos, Auth e dados não foi consultado nesta atualização.
+- Não há testes automatizados declarados; build/lint não testam transações, grants ou falhas remotas.
 
-O site é servido em `https://patricio-fardin.github.io/mapa-do-territorio/`. A migration `20261026132516_admin_excluir_quadra.sql` já foi informada como aplicada em `bkjcfzotxfapgtxkoswb`; esta publicação atualiza a interface após essa aplicação. Para migrations futuras, verifique o repositório e o projeto Supabase por identificador explícito, compare os históricos local/remoto, revise a prévia `db push --dry-run` e aplique somente a mudança pretendida. Confirme o workflow Actions desta publicação. Não use `db reset`, force push, exclusões de teste em produção nem publique a interface antes da migration correspondente.
+### Itens que exigem validação externa
+
+- Confirmar, com acesso autorizado, o projeto Supabase alvo, migrations aplicadas, grants/RLS, existência do perfil admin e estado das configurações de Auth. Não inferir isso a partir de migrations ou `config.toml`.
+- Confirmar no GitHub a configuração de Pages, Actions Variables, branch de publicação e resultado do último workflow.
+- Para testar chamadas de escrita, usar projeto de desenvolvimento isolado e dados descartáveis. Não executar operações de teste em produção.
+- Planejar mecanismo remoto de operação idempotente/consultável antes de prometer desbloqueio confiável após resposta perdida.
+
+### Próximos aprimoramentos possíveis (não implementados)
+
+- Adicionar testes locais/mocks para timeout, respostas fora de ordem, armazenamento falhando, recuperação e coordenação entre abas.
+- Desenhar um contrato de RPC/armazenamento de operações com chave idempotente e consulta de resultado; qualquer alteração no servidor precisa de proposta/revisão/autorização próprias.
+- Definir procedimento administrativo seguro para registros persistidos incompatíveis sem apagá-los cegamente.
+
+## Documentação de reconstrução
+
+[`PROMPT_RECONSTRUCAO_MAPA.md`](PROMPT_RECONSTRUCAO_MAPA.md) é um prompt independente para orientar outro agente na reconstrução integral. Ele inclui contexto técnico verificado, critérios de aceitação, plano por etapas, regras de segurança e lacunas. Para continuar este checkout existente, consulte também [`PROMPT_RESTAURACAO.md`](PROMPT_RESTAURACAO.md), observando que nenhuma instrução nele substitui autorização específica para operação remota, alteração de senha, publicação ou mudança destrutiva.
