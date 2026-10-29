@@ -20,7 +20,8 @@ Perfis declarados no schema local:
 - Autenticação administrativa por alias e senha Supabase; recuperação de senha por link é fluxo separado.
 - Desenho de novas quadras, edição de geometrias, consulta de quadras arquivadas, arquivamento e exclusão definitiva protegida por confirmação.
 - Leituras paginadas do Supabase e atualização por Realtime quando disponível, além de atualização periódica.
-- Proteção local contra operações de situação incertas, coordenada entre abas cooperantes pelo Web Locks API.
+- Proteção local diagnóstica contra operações de situação incertas, coordenada por quadra entre abas cooperantes pelo Web Locks API quando disponível; falhas não bloqueiam indefinidamente o mapa.
+- A migration `20261029120000_idempotent_quadra_updates.sql` adiciona idempotência por UUID e versão otimista para novas alterações, sem remover a RPC legada.
 
 Na inspeção de 27/10/2026, o worktree estava na branch `patricio-fardin-login-admin-password`, no commit local `284bbaa` (`Improve public map labels and navigation`), com modificações locais em `README.md`, `src/App.tsx` e `src/App.css`. A referência local de `origin/main` apontava para o mesmo commit no momento da inspeção; não foi feito `fetch`, portanto isso não confirma o estado remoto atual. As modificações locais não estavam commitadas. Build/lint não substituem validação no ambiente remoto.
 
@@ -144,7 +145,7 @@ Os fatos desta seção descrevem as três migrations versionadas, na ordem abaix
 | Função | Contrato local |
 |---|---|
 | `eh_admin()` | Retorna boolean consultando `perfis` para `auth.uid()` e papel `admin`; `SECURITY DEFINER`, `search_path = ''`. |
-| `atualizar_situacao_quadra(p_quadra_id uuid, p_situacao public.situacao_quadra, p_observacao text DEFAULT NULL)` | Retorna JSONB com `quadra_id`, situação, observação e `updated_at`; valida quadra ativa, bloqueia a linha durante alteração, atualiza situação/observação e grava histórico. A migration 002 concede execução a `anon, authenticated` e nega escrita direta nas tabelas. A função não contém chave de idempotência nem registro consultável por ID da operação. |
+| `atualizar_situacao_quadra(p_quadra_id uuid, p_situacao public.situacao_quadra, p_observacao text DEFAULT NULL)` | Mantém a assinatura legada, mas a migration idempotente faz a função delegar à lógica versionada. Incrementa `versao`, grava histórico e retorna situação/versão sem expor observação. Clientes legados não enviam versão esperada nem UUID, portanto retries legados recebem novas operações. |
 | `geometria_geojson_valida(p_geometria jsonb)` | Valida tipo Polygon/MultiPolygon, arrays/aneis/pontos e faixas de longitude/latitude conforme implementação da migration 002. |
 | `admin_criar_quadra(p_codigo text, p_geometria jsonb)` | Exige `eh_admin`, valida código/geometria, insere quadra, situação inicial pendente e evento criado; retorna objeto JSON com dados da quadra. |
 | `admin_atualizar_geometria(p_quadra_id uuid, p_geometria jsonb)` | Exige `eh_admin`, valida geometria, atualiza somente quadra ativa, grava evento; retorna quadra atualizada. |
@@ -172,13 +173,21 @@ O README anterior registrava a afirmação de que a terceira migration havia sid
 O comportamento a seguir foi conferido em `src/App.tsx` e migrations locais em 27/10/2026:
 
 1. A alteração cria UUID v4 local e persiste registro versão 2 (`quadraId`, código, situação solicitada, estado e indicador de erro) no `localStorage` antes de iniciar `atualizar_situacao_quadra`.
-2. Web Locks exclusivo com nome comum coordena abas cooperantes da mesma origem/perfil. O lock abrange revalidação do registro, gravação local, chamada RPC e manutenção da incerteza/resolução. Sem suporte ou falha, a aplicação bloqueia a alteração. Há um único registro global; a incerteza de uma quadra bloqueia operações em todas as quadras nesse navegador.
+2. Web Locks exclusivo usa um nome derivado da quadra para coordenar abas cooperantes da mesma origem/perfil. O lock é temporário e liberado por `finally`; sem suporte, a operação continua com coordenação apenas na aba. Um registro incerto de uma quadra não bloqueia alterações em outras quadras.
 3. Estados persistidos: `pending` (RPC iniciada/sem resultado), `transport-uncertain` (resposta/erro não conclusivo), `confirmed` (resposta positiva validada pela aplicação) e `resolved` (tombstone). Só a resposta 2xx sem erro, com `quadra_id` igual ao solicitado e situação válida igual à solicitada, pode avançar para `confirmed`. Erros HTTP, exceções, timeout, resposta incompleta ou estado divergente não são prova terminal.
 4. A leitura da situação atual nunca resolve `pending`/`transport-uncertain`. Para `confirmed`, reconciliação pode gravar `resolved` depois de ler a quadra; o caminho de sucesso pode gravar tombstone diretamente após validar a resposta RPC. O tombstone permanece no armazenamento e só é substituído sob lock após comparar identidade/conteúdo esperado.
-5. Registro corrompido, versão antiga/desconhecida, falha de leitura/gravação, perda inesperada do registro e indisponibilidade da coordenação bloqueiam novas gravações. Registros diferentes da versão 2 não são migrados/apagados automaticamente. Consulta repetível informa o estado observado, mas não libera operação incerta.
+5. Registro corrompido, versão antiga/desconhecida, falha de leitura/gravação ou indisponibilidade da coordenação são preservados como diagnóstico e geram aviso; não bloqueiam todas as novas gravações. Um registro incerto da mesma quadra impede somente a repetição simultânea daquela quadra. Registros diferentes da versão 2 não são migrados/apagados automaticamente.
 6. Timeout da interface não cancela a RPC. Resposta atrasada ainda é processada; erro de transporte pode deixar lock/registro pendente. Não há repetição automática nem fila offline.
 
 **Limite importante:** Web Locks cobre apenas abas cooperantes na mesma origem/perfil enquanto o navegador e o armazenamento persistem. Não coordena dispositivos/navegadores diferentes, software antigo não cooperante, nem resiste à limpeza/evicção do `localStorage`. Depois de uma resposta perdida, o cliente não consegue provar que a execução remota terminou ou não ocorrerá tardiamente. Resolução definitiva exige suporte do servidor — por exemplo, chave idempotente/identificador persistido e API para consultar o resultado — inexistente nas migrations locais atuais. Não apresente uma leitura isolada como confirmação do término da RPC.
+
+### Idempotência e versão
+
+A migration `20261029120000_idempotent_quadra_updates.sql` é aditiva. Ela cria `situacoes_quadras.versao`, inicializada em `0`, e a tabela privada `operacoes_situacao_quadras`. A nova RPC `atualizar_situacao_quadra_v2` recebe um UUID lógico, a versão esperada e os mesmos dados da alteração. Repetir o mesmo UUID com os mesmos parâmetros retorna `replayed` sem duplicar histórico; reutilizá-lo com parâmetros diferentes é rejeitado. Alterações concorrentes com versão antiga retornam `conflict`, sem sobrescrever a situação atual. `updated`, `unchanged` e `rejected` são estados explícitos. As respostas públicas não incluem `observacao`; a observação continua sendo usada internamente para validar a identidade da operação.
+
+O frontend tenta a RPC v2 e só usa a RPC antiga quando o banco ainda não possui a nova função, mantendo compatibilidade durante a implantação. A migration corrigida também redefine a RPC antiga para delegar à mesma lógica versionada; contudo, clientes antigos não fornecem UUID e cada retry legado recebe uma nova operação, portanto a idempotência de retry só existe no cliente novo. Sequência segura: aplicar a migration em ambiente de teste, validar a RPC antiga e a v2, aplicar em produção, confirmar que a função antiga passou a delegar, e só então publicar a versão frontend que usa a v2.
+
+A RPC legada usa `public.gen_random_uuid()`, fornecida pela extensão `pgcrypto` criada na migration inicial. A migration não presume uma função instalada manualmente fora desse histórico; se a extensão estiver ausente ou instalada em outro schema, a aplicação deve falhar na validação do ambiente antes da implantação.
 
 ## Configuração, desenvolvimento e publicação
 
@@ -220,7 +229,7 @@ O script `admin:set-password` (`npm.cmd run admin:set-password -- <UUID>`) está
 
 ### Limitações atuais comprovadas
 
-- Sem mecanismo servidor de idempotência/consulta de operações, uma RPC incerta pode continuar bloqueada sem resolução automática; a leitura de estado não prova que cessaram efeitos remotos.
+- A RPC v2 fornece idempotência e consulta por UUID, mas uma RPC antiga ou cliente legado não fornece UUID nem versão esperada; durante a transição, retries legados podem continuar sem idempotência lógica completa.
 - A persistência é local a navegador/perfil e pode ser perdida por limpeza ou evicção.
 - Registro incompatível/corrompido é fail-closed, mas não há ferramenta de reparo seguro na interface.
 - O estado final do Supabase remoto, grants/RLS efetivos, Auth e dados não foi consultado nesta atualização.
