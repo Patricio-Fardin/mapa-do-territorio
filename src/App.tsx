@@ -874,11 +874,15 @@ function MapPage() {
     if (!pendingSaveRef.current || pendingSaveRef.current.id !== id) return false
     const persistida = atualizarGravacaoIncerta(null)
     if (!persistida) {
-      // O servidor já devolveu um resultado terminal. Se o storage falhar,
-      // libera apenas a memória desta aba; o registro persistido será
-      // reconciliado novamente após uma recarga.
+      // O servidor já devolveu um resultado terminal. Se outra aba removeu
+      // ou migrou o registro, não mantenha uma operação fantasma na memória.
       pendingSaveRef.current = null
       setPendingSave(null)
+      const estadoLocal = lerGravacaoPersistida()
+      if (estadoLocal.status === 'ready' && !estadoLocal.record) {
+        persistedRecordRef.current = null
+        setStorageStatus('ready')
+      }
     }
     return true
   }
@@ -909,6 +913,11 @@ function MapPage() {
           window.setTimeout(() => resolve({ kind: 'timeout' }), TIMEOUT_RECONCILIACAO_MS)
         }),
       ])
+      // Diferencia uma resposta válida sem registro de erros/timeout da consulta.
+      // Isso permite reconciliar operações antigas usando a versão do servidor.
+      const operacaoAusenteConfirmada = resultadoOperacao.kind === 'result'
+        && !resultadoOperacao.error
+        && resultadoOperacao.data === null
       if (resultadoOperacao.kind === 'result' && !resultadoOperacao.error && resultadoOperacao.data) {
         try {
           const operacao = respostaDaRpc(resultadoOperacao.data, pendente.quadraId)
@@ -969,6 +978,28 @@ function MapPage() {
           resultado
             ? `A quadra ${pendente.quadraCodigo} não foi encontrada. A gravação ainda não foi confirmada; consulte novamente.`
             : `A consulta da quadra ${pendente.quadraCodigo} falhou. A gravação ainda não foi confirmada; tente consultar novamente.`,
+        )
+        return
+      }
+
+      // Se a consulta da operação respondeu validamente que o UUID não existe,
+      // mas a versão da quadra já avançou, uma tentativa antiga com a versão
+      // esperada anterior não poderá gravar por cima do estado atual via RPC v2.
+      if (
+        operacaoAusenteConfirmada
+        && atualPersistido.versao > pendente.versaoEsperada
+        && atualPersistido.situacao === pendente.situacaoSolicitada
+      ) {
+        if (!resolverGravacaoTerminal(pendente.id)) return
+        setQuadras((items) => items.map((quadra) => quadra.id === pendente.quadraId
+          ? { ...quadra, situacao: atualPersistido.situacao, versao: atualPersistido.versao }
+          : quadra))
+        definirFeedback(
+          pendente.quadraId,
+          atualPersistido.situacao === pendente.situacaoSolicitada
+            ? `O servidor já registra ${NOMES[atualPersistido.situacao]} para a quadra ${pendente.quadraCodigo} (versão ${atualPersistido.versao}). O registro local antigo foi reconciliado.`
+            : `A operação local da quadra ${pendente.quadraCodigo} ficou desatualizada. O servidor mantém ${NOMES[atualPersistido.situacao]} (versão ${atualPersistido.versao}); tente novamente para aplicar outra situação.`,
+          atualPersistido.situacao === pendente.situacaoSolicitada ? 'success' : 'error',
         )
         return
       }
@@ -1044,12 +1075,19 @@ function MapPage() {
             return
           }
           if (persisted.status === 'ready' && !persisted.record && pendingSaveRef.current) {
-            setStorageStatus('corrupt')
-            atualizarMensagemGravacaoLocal(
-              pendingSaveRef.current.id,
-              `O registro da operação da quadra ${pendingSaveRef.current.quadraCodigo} não foi encontrado no armazenamento. A operação permanece bloqueada por segurança.`,
-            )
+            persistedRecordRef.current = null
+            const operacaoAtual = pendingSaveRef.current
+            if (!atualizarGravacaoIncerta(operacaoAtual)) {
+              setStorageStatus('corrupt')
+              atualizarMensagemGravacaoLocal(
+                operacaoAtual.id,
+                `O registro local da quadra ${operacaoAtual.quadraCodigo} não pôde ser restaurado. Consulte novamente o servidor.`,
+              )
+              adquiriuLock = true
+              return
+            }
             adquiriuLock = true
+            await reconciliationActionRef.current(true)
             return
           }
           persistedRecordRef.current = persisted.record
@@ -1087,11 +1125,19 @@ function MapPage() {
         return
       }
       if (persisted.status === 'ready' && !persisted.record && pendingSaveRef.current) {
-        setStorageStatus('corrupt')
-        atualizarMensagemGravacaoLocal(
-          pendingSaveRef.current.id,
-          `O registro da operação da quadra ${pendingSaveRef.current.quadraCodigo} desapareceu de outro contexto. A operação permanece bloqueada porque não é possível confirmar o motivo da remoção.`,
-        )
+        // Outra aba pode ter removido o registro enquanto esta aba ainda mantém
+        // uma operação válida em memória. Restaure-a com comparação otimista e
+        // consulte o servidor, em vez de deixar um aviso permanente nesta aba.
+        persistedRecordRef.current = null
+        const operacaoAtual = pendingSaveRef.current
+        if (!atualizarGravacaoIncerta(operacaoAtual)) {
+          atualizarMensagemGravacaoLocal(
+            operacaoAtual.id,
+            `O registro local da quadra ${operacaoAtual.quadraCodigo} não pôde ser restaurado. Consulte novamente o servidor.`,
+          )
+          return
+        }
+        void reconciliationActionRef.current(true)
         return
       }
       setStorageStatus(persisted.status)
@@ -1130,11 +1176,17 @@ function MapPage() {
           return
         }
         if (!persisted.record && pendingSaveRef.current) {
-          setStorageStatus('corrupt')
-          atualizarMensagemGravacaoLocal(
-            pendingSaveRef.current.id,
-            `O registro da operação da quadra ${pendingSaveRef.current.quadraCodigo} não foi encontrado no armazenamento. A operação permanece bloqueada por segurança.`,
-          )
+          persistedRecordRef.current = null
+          const operacaoAtual = pendingSaveRef.current
+          if (!atualizarGravacaoIncerta(operacaoAtual)) {
+            setStorageStatus('corrupt')
+            atualizarMensagemGravacaoLocal(
+              operacaoAtual.id,
+              `O registro local da quadra ${operacaoAtual.quadraCodigo} não pôde ser restaurado. Consulte novamente o servidor.`,
+            )
+            return
+          }
+          await reconciliationActionRef.current(true)
           return
         }
         persistedRecordRef.current = persisted.record
