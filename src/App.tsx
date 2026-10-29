@@ -39,7 +39,22 @@ type GravacaoPersistida = Omit<GravacaoIncerta, 'message'>
 type EstadoPersistencia = 'ready' | 'unavailable' | 'corrupt' | 'coordination-unavailable'
 type ResultadoPersistencia = 'ok' | 'unavailable' | 'corrupt'
 const CHAVE_GRAVACAO_INCERTA = 'mapa-do-territorio:gravacao-incerta:v1'
+const CHAVE_DIAGNOSTICO_GRAVACAO_INCERTA = 'mapa-do-territorio:gravacao-incerta:diagnostico:v1'
 const LOCK_GRAVACAO_QUADRAS = 'mapa-do-territorio:gravacao-quadras:v1'
+
+function quarentenarGravacaoPersistida(raw: string): boolean {
+  try {
+    // Preserve o valor inválido para diagnóstico, mas retire-o da chave ativa
+    // para que um registro antigo não mantenha o aviso em todas as visitas.
+    if (window.localStorage.getItem(CHAVE_DIAGNOSTICO_GRAVACAO_INCERTA) === null) {
+      window.localStorage.setItem(CHAVE_DIAGNOSTICO_GRAVACAO_INCERTA, raw)
+    }
+    window.localStorage.removeItem(CHAVE_GRAVACAO_INCERTA)
+    return true
+  } catch {
+    return false
+  }
+}
 
 function validarGravacaoPersistida(value: unknown): value is GravacaoPersistida {
   if (!value || typeof value !== 'object') return false
@@ -100,9 +115,13 @@ function lerGravacaoPersistida(): { status: EstadoPersistencia; gravacao: Gravac
   try {
     parsed = JSON.parse(raw)
   } catch {
-    return { status: 'corrupt', gravacao: null, record: null }
+    const quarantined = quarentenarGravacaoPersistida(raw)
+    return { status: quarantined ? 'ready' : 'corrupt', gravacao: null, record: null }
   }
-  if (!validarGravacaoPersistida(parsed)) return { status: 'corrupt', gravacao: null, record: null }
+  if (!validarGravacaoPersistida(parsed)) {
+    const quarantined = quarentenarGravacaoPersistida(raw)
+    return { status: quarantined ? 'ready' : 'corrupt', gravacao: null, record: null }
+  }
   return {
     status: 'ready',
     record: parsed,
