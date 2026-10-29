@@ -1,6 +1,6 @@
 # Prompt mestre de reconstrução — Mapa de Territórios
 
-**Atualizado em 27 de outubro de 2026.** Este prompt é independente da conversa em que foi criado. A stack, os contratos e os comportamentos abaixo foram conferidos diretamente no repositório disponível nessa data. Ele descreve a implementação documentada, não o estado remoto atual do Supabase ou do GitHub Pages.
+**Revisado em 29 de outubro de 2026.** Este prompt é independente da conversa em que foi criado. Stack, arquivos, scripts e migrations foram rechecados na checkout disponível nessa data. Ele documenta o código versionado, não prova o estado remoto do Supabase nem o que está publicado no GitHub Pages. Leia também `AGENTS.md` (persona e regras persistentes), `PROMPT_RECONSTRUCAO.md` (prompt resumido) e `README.md` (estado do produto e roadmap).
 
 ---
 
@@ -36,7 +36,10 @@ Reconstrua a aplicação progressivamente. Não comece substituindo tecnologias 
 - Rótulos são posicionados dentro de polígonos, ajustados ao espaço e não capturam cliques. O mapa público prioriza situação/símbolo; código pode ser omitido em quadras pequenas.
 - Base cartográfica: tiles OpenStreetMap em `https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png`. Exiba a atribuição OpenStreetMap Contributors e o link de copyright.
 - Centro inicial: `[-20.6353, -40.7498]`, zoom 14. Após carregar quadras, o mapa tenta enquadrar os limites; há controle para restaurar a visualização.
-- O layout adapta contadores, painel de seleção, safe areas e alturas do mapa para celular. O estado de carregamento usa movimento reduzido quando `prefers-reduced-motion` está ativo.
+- A tela pública é map-first: mapa ocupa `100dvh` (com fallback `100vh`), cabeçalho translúcido flutuante e indicadores em chips sobre o mapa. O enquadramento inicial usa `fitBounds` com padding para não cobrir os elementos de interface.
+- O painel da quadra é um overlay responsivo. A linha “Situação atual” substitui o texto temporariamente por “Aguardando…”/“Salvando…” e depois mostra o status confirmado ou “Erro ao salvar”; não existe uma área fixa de feedback abaixo dos botões. O estado de salvamento usa cor neutra, o erro fica vermelho, o motivo fica no atributo `title` da linha e ela pode receber foco de teclado.
+- Em desktop, o painel adapta largura a partir de 641 px e pode ampliar até 440 px a partir de 1200 px. A linha de status mantém uma linha com altura/line-height estáveis; validar novamente em viewport estreita e ampla sempre que o CSS mudar.
+- O layout adapta safe areas e controles para celular. Respeitar `prefers-reduced-motion` em novas animações.
 - Dados carregam por consultas Supabase com paginação. Realtime é assinado quando configurado e há também atualização periódica. Não simule dados locais como se fossem persistidos se o Supabase estiver ausente.
 
 ### 2.3 Funcionalidades administrativas
@@ -53,7 +56,7 @@ Reconstrua a aplicação progressivamente. Não comece substituindo tecnologias 
 
 ## 3. Stack e ferramentas verificadas
 
-Os números são os declarados no `package.json` e/ou instalados no ambiente em 27/10/2026. Ao reconstruir, leia o manifesto e lockfile atuais em vez de assumir que essas versões continuam sendo a escolha desejada.
+Os números abaixo foram observados em 27/10/2026 e os scripts foram rechecados em 29/10/2026. Ao reconstruir, leia o manifesto e lockfile atuais em vez de assumir que essas versões continuam sendo a escolha desejada.
 
 | Tecnologia | Declarada | Instalada observada | Papel |
 |---|---:|---:|---|
@@ -74,7 +77,7 @@ Os números são os declarados no `package.json` e/ou instalados no ambiente em 
 | OpenStreetMap | Serviço externo, não pacote npm | Não aplicável | Tiles e crédito cartográfico. |
 | Web Locks / `localStorage` / evento `storage` | APIs do navegador | Depende do runtime | Coordenação/persistência local para operação incerta. `BroadcastChannel` não é usado. |
 
-Não há ESLint, biblioteca de ícones, framework de formulários, biblioteca de validação externa ou runner de testes declarado no inventário. Não adicione dependências sem necessidade justificada.
+Não há ESLint, biblioteca de ícones, framework de formulários ou runner de testes unitários/e2e declarado. Existe o script específico `npm.cmd run test:idempotent-migration` para verificar invariantes da migration; não o trate como cobertura de UI ou de integração remota. Não adicione dependências sem necessidade justificada.
 
 ## 4. Arquitetura e arquivos observados
 
@@ -94,6 +97,7 @@ src/
 scripts/
   copy-404.mjs
   set-admin-password.mjs
+  validate-idempotent-migration.mjs
 supabase/
   config.toml
   migrations/
@@ -108,6 +112,9 @@ package.json
 package-lock.json
 index.html
 README.md
+AGENTS.md
+PROMPT_RECONSTRUCAO.md
+PROMPT_RECONSTRUCAO_MAPA.md
 PROMPT_RESTAURACAO.md
 ```
 
@@ -131,6 +138,7 @@ As migrations locais encontradas, em ordem:
 1. `supabase/migrations/20261022000100_initial_schema.sql`
 2. `supabase/migrations/20261022000200_public_map_admin_policies.sql`
 3. `supabase/migrations/20261026132516_admin_excluir_quadra.sql`
+4. `supabase/migrations/20261029120000_idempotent_quadra_updates.sql`
 
 ### 5.1 Schema e relações
 
@@ -146,7 +154,10 @@ As migrations locais encontradas, em ordem:
 ### 5.2 RPCs e regras de autorização
 
 - `eh_admin() -> boolean`: verifica `perfis` por `auth.uid()`/papel admin; `SECURITY DEFINER`, `search_path = ''`.
-- `atualizar_situacao_quadra(p_quadra_id uuid, p_situacao public.situacao_quadra, p_observacao text DEFAULT NULL) -> jsonb`: confirma quadra ativa, bloqueia linhas consultadas, atualiza situação/observação e histórico, retorna ID/situação/observação/updated_at. A versão da migration 002 concede execução a `anon, authenticated`, sem permitir escrita direta em tabelas. A função não possui parâmetro de idempotência nem registro consultável por identificador de operação.
+- `atualizar_situacao_quadra(p_quadra_id uuid, p_situacao public.situacao_quadra, p_observacao text DEFAULT NULL) -> jsonb`: mantém a assinatura legada, mas a migration 004 redefine a função para delegar à lógica versionada usando um UUID novo para cada chamada. Clientes legados continuam sem idempotência lógica entre retries, pois não enviam UUID nem versão esperada.
+- `atualizar_situacao_quadra_v2(p_operacao_id uuid, p_quadra_id uuid, p_situacao public.situacao_quadra, p_observacao text, p_versao_esperada integer) -> jsonb`: exige versão esperada, usa um identificador estável de operação, aplica controle otimista de versão e pode devolver `updated`, `unchanged`, `conflict`, `rejected` ou `replayed`.
+- `consultar_operacao_situacao_quadra(p_operacao_id uuid) -> jsonb`: consulta o resultado persistido da operação, removendo o campo de observação. A migration 004 cria `public.operacoes_situacao_quadras` com RLS habilitada e sem acesso direto para clientes; execução ocorre por funções autorizadas.
+- `aplicar_situacao_quadra_idempotente(...)`: função interna `SECURITY DEFINER` compartilhada pelas RPCs legada e v2; serializa operações, armazena o resultado e evita duplicar efeito quando o mesmo UUID/parâmetros são repetidos. Isso descreve a migration local e não confirma o deploy remoto.
 - `geometria_geojson_valida(p_geometria jsonb) -> boolean`: valida tipos, estrutura de anéis/coordenadas e limites de latitude/longitude conforme a migration 002.
 - `admin_criar_quadra(p_codigo text, p_geometria jsonb) -> jsonb`: exige `eh_admin`, valida dados, cria quadra, situação `pendente` e evento `criada`.
 - `admin_atualizar_geometria(p_quadra_id uuid, p_geometria jsonb) -> jsonb`: exige `eh_admin`, valida e atualiza quadra ativa e histórico.
@@ -157,27 +168,27 @@ As migrations locais encontradas, em ordem:
 
 ### 5.3 Estado remoto não comprovado
 
-As migrations e configurações locais não confirmam o estado do projeto Supabase remoto. A documentação anterior deste repositório registra, como afirmação atribuída ao proprietário, que a migration `20261026132516_admin_excluir_quadra.sql` teria sido aplicada ao projeto `bkjcfzotxfapgtxkoswb`; não houve verificação remota nesta atualização. Trate essa afirmação como não confirmada até inspeção autorizada do projeto e histórico remoto. `project_id` de `supabase/config.toml` e arquivos `.temp` não identificam com segurança o destino remoto. Não execute migrations, queries de escrita ou alteração de dados como parte da reconstrução sem aprovação explícita.
+As migrations e configurações locais não confirmam o estado do projeto Supabase remoto. A migration `20261029120000_idempotent_quadra_updates.sql` e seus contratos são locais até que o histórico remoto e as definições efetivas sejam verificados em acesso autorizado. A documentação anterior registra como afirmação atribuída ao proprietário que `20261026132516_admin_excluir_quadra.sql` teria sido aplicada ao projeto `bkjcfzotxfapgtxkoswb`; isso também não foi confirmado nesta revisão. `project_id` de `supabase/config.toml` e arquivos `.temp` não identificam com segurança o destino remoto. Não execute migrations, queries de escrita ou alteração de dados como parte da reconstrução sem aprovação explícita.
 
 ## 6. Consistência das alterações de situação
 
 Implementação atual em `src/App.tsx` (confirmar novamente se o código disponível divergir):
 
-1. Antes da RPC, cria UUID v4 e persiste em `localStorage` um registro versão 2 com ID da operação, ID/código da quadra, situação solicitada, estado e indicador de erro; não grava credenciais ou tokens.
-2. Web Locks exclusivo com nome comum coordena abas cooperantes da mesma origem/perfil durante validação do registro, gravação local, RPC e manutenção/resolução. A aplicação relê o registro depois de adquirir lock. Sem Web Locks ou com falha da coordenação/armazenamento, bloqueia novas alterações.
-3. O estado global único significa que operação incerta em qualquer quadra bloqueia operações em todas as quadras naquele navegador/perfil.
-4. Estados persistidos:
+1. Antes da RPC, cria UUID v4 e tenta persistir em `localStorage` um registro versão 2 com ID da operação, ID/código da quadra, situação solicitada, estado e indicador de erro; o registro não contém credenciais ou tokens. Trate falhas de persistência como estado diagnóstico explícito e não afirme que a tentativa local ficou protegida quando não foi gravada.
+2. O Web Lock usa um nome derivado da quadra e coordena abas cooperantes na mesma origem/perfil quando disponível. A implementação atual tem caminhos degradados quando Web Locks ou armazenamento não estão disponíveis; inspecione esses caminhos em vez de presumir bloqueio seguro global.
+3. O registro de operação local usa uma chave de armazenamento e guarda uma operação incerta. Não deduza que o mecanismo fornece uma fila durável ou isolamento entre todos os dispositivos. Antes de alterar esse fluxo, teste em especial uma pendência de uma quadra seguida de alteração em outra.
+4. Estados locais documentados:
    - `pending`: tentativa iniciada sem resultado conclusivo.
-   - `transport-uncertain`: erro HTTP, exceção/transport, timeout ou formato de resposta não validado.
-   - `confirmed`: resposta 2xx sem erro que contém `quadra_id` correspondente e situação válida exatamente igual à solicitada.
-   - `resolved`: tombstone; não se apaga a chave.
-5. A leitura da situação atual da quadra não resolve `pending` nem `transport-uncertain`, mesmo se encontrar a situação anterior ou solicitada. Somente o retorno validado da RPC pode chegar a `confirmed`. Uma resposta atrasada ainda é processada; timeout da UI não cancela servidor nem repete gravação.
-6. Registro corrompido, versão diferente/antiga, falha de localStorage, conteúdo alterado ou perda inesperada bloqueiam de forma conservadora. Versões antigas não são migradas/apagadas automaticamente. A comparação identidade/conteúdo e o lock protegem operações cooperantes; evento `storage` propaga mudanças às outras abas. `BroadcastChannel` não é usado.
-7. Uma operação ambígua que sobrevive à recarga pode permanecer bloqueada sem resolução cliente. Não há retry automático, fila offline, ID idempotente remoto ou RPC para consultar operação individual.
+   - `transport-uncertain`: erro de transporte, timeout ou resposta ainda não validada.
+   - `confirmed`: resposta RPC 2xx sem erro e payload validado para a quadra/situação esperadas.
+   - `resolved`: tombstone/estado terminal local quando o fluxo de reconciliação o estabelece.
+5. A migration 004 fornece UUID idempotente, controle otimista de versão e RPC `consultar_operacao_situacao_quadra`. O cliente deve consultar o registro da operação antes de inferir desfecho a partir da situação corrente. A reconciliação também tem caminhos de compatibilidade baseados em versão; inspecione-os no código atual.
+6. Timeout da interface não cancela a RPC. Uma resposta atrasada ainda pode ser processada; não repita automaticamente gravações ambíguas nem afirme que uma leitura isolada prova que uma chamada remota terminou.
+7. `localStorage` pode ser limpo/evicto e Web Locks não coordenam dispositivos, perfis ou navegadores diferentes. `storage` notifica abas mas não é um mutex. Não afirme que há fila offline ou coordenação global.
 
-Garantias do cliente: evitar gravações simultâneas por abas cooperantes enquanto lock e armazenamento estiverem operacionais; persistir tentativa local para recuperação após recarga; não usar uma leitura isolada para afirmar fim da RPC.
+Garantias condicionais do cliente: Web Locks coordena abas cooperantes enquanto a API funciona; o armazenamento local pode ajudar na recuperação somente quando o registro foi efetivamente gravado e permanece disponível. O código tem caminhos de fallback quando Web Locks/localStorage falham; verifique se a operação prossegue sem persistência antes de afirmar qualquer garantia.
 
-Não garantido: coordenação entre dispositivos/navegadores/perfis, sobrevivência à limpeza/evicção do armazenamento, prova de que a RPC parou após perda da resposta, nem impossibilidade de efeito remoto tardio. Uma resposta 2xx com payload compatível segue o contrato do endpoint, mas não é prova absoluta contra resposta incorreta/fabricada por infraestrutura intermediária. Para uma resolução robusta após perda de resposta, proponha separadamente uma API servidor com chave idempotente/ID da operação e consulta de resultado; não altere servidor sem autorização.
+Não garantido: coordenação entre dispositivos/navegadores/perfis, sobrevivência à limpeza/evicção do armazenamento, prova de que a RPC parou após perda da resposta, nem impossibilidade de efeito remoto tardio. A migration local 004 acrescenta UUID idempotente, resultado persistido e RPC de consulta; antes de desenhar uma segunda solução, confirme se a migration foi aplicada e teste a reconciliação com respostas perdidas/atrasadas. Não confunda o código de migration com o contrato efetivamente implantado.
 
 ## 7. Requisitos verificáveis de reconstrução
 
@@ -200,7 +211,7 @@ Implemente e valide critérios de aceitação:
 - Coordenação multi-aba deve usar mecanismo atômico compatível (Web Locks se disponível) cobrindo operação inteira. `storage`/`BroadcastChannel` notificam, mas não substituem mutex.
 - HTTP 4xx/5xx, timeout, abort, erro de transporte, corpo ausente/incompatível ou SQLSTATE sintático isolado não provam término; mantêm incerteza/bloqueio.
 - O caminho de confirmação exige retorno 2xx sem erro e payload que passe o contrato real da RPC, vinculado à quadra/situação solicitadas.
-- Leitura de estado atual não resolve RPC pendente/incerta. Não repetir automaticamente escrita incerta nem apagar tombstone/registro para desbloquear UI.
+- Preferir consulta pelo UUID em `consultar_operacao_situacao_quadra` para reconciliar uma operação identificada. Um fallback baseado em estado/versão precisa de uma prova técnica de que a tentativa original não poderá mais gravar; não usar apenas a igualdade da situação como prova. Não repetir automaticamente escrita incerta nem apagar registro para desbloquear UI.
 - Erros de armazenamento, versão desconhecida, corrupção, ausência inexplicada e coordenação indisponível devem bloquear com mensagem acessível e específica.
 - Testes locais com mocks devem incluir respostas fora de ordem, timeout seguido de resposta tardia, 400/401/403/409/422, 429/5xx/gateway, transporte/abort, dados/payload inválidos, leitura antes/depois da situação, storage indisponível, recarga e múltiplas abas. Não teste com dados reais.
 - Não afirme que Web Locks/localStorage provam término remoto; explique limites e operação de suporte para bloqueios persistentes.
@@ -219,6 +230,8 @@ Implemente e valide critérios de aceitação:
 
 - Formularios têm labels associados, autocomplete apropriado, estados carregando/erro em live regions e botões desabilitados quando operação não segura.
 - Foco de teclado visível; controles do mapa possuem nomes acessíveis; informação de cor também é indicada por texto/símbolo.
+- A linha “Situação atual” conserva uma única linha e altura estável entre carregamento/sucesso/erro; não inserir uma área de feedback de altura fixa que amplie o painel. Validar posições do painel e botões em viewport estreita e ampla.
+- O motivo do erro deve ser acessível por tooltip sem ser cortado pelo card; garantir fallback por foco de teclado e texto alternativo acessível.
 - Respeitar `prefers-reduced-motion`, dimensões touch, safe areas e layout móvel.
 
 ## 8. Instalação, validação e publicação
@@ -230,6 +243,7 @@ npm.cmd ci
 npm.cmd run dev
 npm.cmd run build
 npm.cmd run lint
+npm.cmd run test:idempotent-migration
 git diff --check
 npm.cmd run preview
 ```
@@ -237,7 +251,7 @@ npm.cmd run preview
 - O workflow usa Node 24, `npm ci`, `npm run build`, Pages artifact e deploy em push a `main`/`workflow_dispatch`.
 - O build executa `tsc -b`, Vite e `node scripts/copy-404.mjs`.
 - Lint executa `oxlint`.
-- Não há script de teste ou arquivos de teste correspondentes no inventário de 27/10/2026. Se implementar testes, documente o runner adicionado e resultados reais; não fabrique comando/resultado.
+- O script `npm.cmd run test:idempotent-migration` existe e valida invariantes da migration. Não há uma suíte geral de testes unitários/e2e no inventário revisado em 29/10/2026. Se implementar testes de UI/integração, documente o runner adicionado e resultados reais; não fabrique comando/resultado.
 - Variáveis públicas do frontend: `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_ADMIN_USERNAME`, `VITE_ADMIN_LOGIN_EMAIL`. Actions utiliza GitHub Variables com esses nomes. Não inserir segredo nas variáveis `VITE_*`.
 - Site configurado: `https://patricio-fardin.github.io/mapa-do-territorio/`, base do Vite `/mapa-do-territorio/`.
 - Não há comando de deploy manual no `package.json`; publicação é workflow Actions. Antes de declarar publicada, confirme execução/URL/SHA no GitHub.
@@ -274,14 +288,39 @@ Antes de qualquer decisão que dependa delas, liste e pergunte objetivamente:
 2. **Produção da migration de exclusão:** README anterior registra que o proprietário teria informado que `20261026132516_admin_excluir_quadra.sql` já foi aplicada ao projeto `bkjcfzotxfapgtxkoswb`; isso não foi verificado no ambiente remoto. Não reaplique nem declare aplicada sem consulta autorizada.
 3. **Provisionamento/admin:** UUID/Auth do administrador, associação atual `perfis`, fluxo de criação inicial e aliases/e-mail configurados não são verificáveis sem acesso autorizado. Não criar/trocar conta por conta própria.
 4. **Dados reais das quadras:** não foi identificado seed no repositório; `supabase/config.toml` lista `./seed.sql`, mas esse arquivo não foi encontrado na árvore. Dados, quantidade e qualidade das geometrias remotas são desconhecidos.
-5. **Recuperação de RPC incerta:** não existe ID idempotente nem endpoint/tabela de consulta de operação nas migrations inspecionadas. Após resposta perdida não se pode provar término; uma proposta servidor é necessária para resolver de forma definitiva.
+5. **Recuperação de RPC incerta:** a migration local 004 adiciona UUID idempotente, tabela de resultados e RPC de consulta, mas seu estado remoto não foi confirmado. Clientes legados não enviam UUID/versão e não têm idempotência completa entre retries. Após erro de transporte, teste o caminho real de reconciliação antes de afirmar que o incidente foi resolvido.
 6. **Ambiente Pages:** Actions Variables, configuração de Pages, último deploy, domínio/URL efetivamente publicada e verde do workflow não foram verificados.
 7. **Requisitos adicionais de negócio:** semântica do papel `acompanhamento`, necessidade de observações, trilha/auditoria, retenção e regras operacionais além do schema existente precisam de decisão do responsável.
-8. **Compatibilidade alvo:** o workflow fixa Node 24, mas o manifesto não declara `engines`; navegadores alvo/nível de suporte a Web Locks não estão documentados. A aplicação atual falha fechada quando a API de locks não existe.
+8. **Compatibilidade alvo:** o workflow fixa Node 24, mas o manifesto não declara `engines`; navegadores alvo/nível de suporte a Web Locks não estão documentados. O código contém um caminho degradado quando Web Locks não existe e pode tentar a operação com coordenação limitada à aba; verifique esse comportamento e o efeito de falha do armazenamento antes de afirmar que o sistema falha fechado.
 
 Não substitua nenhuma dessas lacunas por credenciais fictícias apresentadas como reais, schema inventado, migration presumida ou estado de produção não consultado.
 
-## 12. Relatório final obrigatório do agente
+## 12. Plano atual de evolução da interface — referência de 29/10/2026
+
+### Já entregue e validado em commits anteriores
+
+- Mapa público em tela cheia, cabeçalho translúcido e chips de indicadores flutuantes; enquadramento inicial compensando os overlays (`57b329a`).
+- Feedback de situação em linha, sem área de altura fixa abaixo dos botões: “Salvando…”/estado final/“Erro ao salvar” (`b672179`).
+- Ajuste do painel para desktop, status de uma linha, tooltip `title`, cor de erro e foco de teclado (`95b6993`). A simulação visual local observou a linha com altura constante e posição dos botões estável em janelas desktop estreita e ampla; isso não é substituto para uma suíte automatizada.
+
+### Pendências de interface
+
+1. **Mapa-base administrativo:** escolher OSM ou CARTO Positron por troca de `TileLayer`, sem alterar dados GeoJSON/status. Confirmar endpoint, atribuição e termos atuais do provedor antes de codificar.
+2. **Controles:** agrupar geolocalização e zoom `+`/`−` no canto inferior direito, respeitando permissão de geolocalização, safe areas e painel de seleção.
+3. **Tema:** mover a escolha de tema para a área administrativa e remover o controle de tema isolado da interface pública se ainda estiver presente na versão alvo. Definir persistência local ou compartilhada antes de escolher armazenamento.
+4. **Rótulos por zoom:** ocultar o texto do rótulo em zoom menor que 15 e exibi-lo em zoom 15 ou superior, tanto no mapa público quanto no administrativo; não ocultar ou desativar os polígonos.
+
+### Pendências técnicas/documentais
+
+- Criar testes/mocks para timeout, resposta atrasada/fora de ordem, conflitos, falhas de armazenamento, recarga e coordenação entre abas. O script `test:idempotent-migration` testa invariantes SQL locais e não cobre a UI.
+- Revisar comportamento quando uma operação incerta existe para outra quadra, ou quando Web Locks/localStorage não estão disponíveis; não presumir segurança que não foi exercitada.
+- Confirmar o estado real da migration 004, das RPCs/grants/RLS/Auth no Supabase remoto apenas com autorização e acesso apropriados.
+- Definir procedimento seguro de suporte para registros locais incompatíveis/corrompidos; nunca removê-los cegamente para “desbloquear” a interface.
+- Manter README, prompt resumido, prompt mestre e `AGENTS.md` alinhados com a implementação real e as pendências aprovadas.
+
+Os itens pendentes não devem ser descritos como implementados. Atualize seu estado somente após alteração, validações documentadas e, quando aplicável, confirmação remota.
+
+## 13. Relatório final obrigatório do agente
 
 Ao terminar qualquer reconstrução, informe:
 
@@ -295,4 +334,4 @@ Ao terminar qualquer reconstrução, informe:
 
 ---
 
-**Fim do prompt mestre.** O agente que receber este documento deve iniciar pelo inventário do ambiente onde estiver executando; este texto é contexto verificado do repositório em 27/10/2026, não substitui nova inspeção da checkout atual.
+**Fim do prompt mestre.** O agente que receber este documento deve iniciar pelo inventário do ambiente onde estiver executando. Este texto foi revisado em 29/10/2026 e descreve a implementação local inspecionada nessa data; não substitui nova inspeção da checkout atual, nem confirma estado remoto do Supabase ou do GitHub Pages.

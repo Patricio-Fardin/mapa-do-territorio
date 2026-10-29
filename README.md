@@ -1,6 +1,6 @@
 # Mapa de Territórios
 
-**Documentação técnica atualizada em 27 de outubro de 2026.** Esta descrição foi conferida diretamente no código, nas configurações e nas migrations versionadas neste repositório. Ela descreve o estado local inspecionado; não comprova o estado atual do Supabase remoto nem o que está publicado no GitHub Pages.
+**Documentação técnica revisada em 29 de outubro de 2026.** Esta descrição reflete o código, scripts, configurações e migrations versionadas inspecionados nesta revisão. A existência de uma migration local não comprova que ela foi aplicada ao Supabase remoto; build local ou commit também não comprovam publicação até que o GitHub Actions e os assets públicos sejam conferidos.
 
 ## Identificação e finalidade
 
@@ -15,7 +15,9 @@ Perfis declarados no schema local:
 
 ### Funcionalidades implementadas
 
-- Mapa público de quadras ativas, contadores, seleção e atualização de situação.
+- Mapa público de quadras ativas em tela cheia; cabeçalho translúcido flutuante e contadores compactos sobre o mapa.
+- Seleção de quadras e atualização de situação com feedback em linha: o status existente muda para “Salvando…” e depois para o status confirmado ou “Erro ao salvar”, sem criar uma área de feedback de altura fixa.
+- Painel da quadra responsivo em dispositivos móveis e desktops; motivo do erro disponível pelo `title` e foco de teclado.
 - Rótulos permanentes adaptáveis ao tamanho do polígono.
 - Autenticação administrativa por alias e senha Supabase; recuperação de senha por link é fluxo separado.
 - Desenho de novas quadras, edição de geometrias, consulta de quadras arquivadas, arquivamento e exclusão definitiva protegida por confirmação.
@@ -23,7 +25,7 @@ Perfis declarados no schema local:
 - Proteção local diagnóstica contra operações de situação incertas, coordenada por quadra entre abas cooperantes pelo Web Locks API quando disponível; falhas não bloqueiam indefinidamente o mapa.
 - A migration `20261029120000_idempotent_quadra_updates.sql` adiciona idempotência por UUID e versão otimista para novas alterações, sem remover a RPC legada.
 
-Na inspeção de 27/10/2026, o worktree estava na branch `patricio-fardin-login-admin-password`, no commit local `284bbaa` (`Improve public map labels and navigation`), com modificações locais em `README.md`, `src/App.tsx` e `src/App.css`. A referência local de `origin/main` apontava para o mesmo commit no momento da inspeção; não foi feito `fetch`, portanto isso não confirma o estado remoto atual. As modificações locais não estavam commitadas. Build/lint não substituem validação no ambiente remoto.
+Informações sobre branch, HEAD, alterações locais e status de publicação são transitórias e devem ser verificadas ao iniciar cada sessão, em vez de copiadas como estado permanente nesta documentação. O agente deve preservar todo arquivo não versionado ou modificação preexistente, inclusive `revisao_tecnica.txt`, salvo instrução expressa em contrário.
 
 ## Tecnologias e ferramentas
 
@@ -53,7 +55,7 @@ Versões declaradas vêm de `package.json`; versões efetivamente instaladas for
 | OpenStreetMap | Serviço externo, sem versão npm | Não aplicável | Tiles e atribuição em `src/App.tsx` |
 | Web Locks, `localStorage`, evento `storage` | APIs do navegador | Depende do navegador | Coordenação/persistência em `src/App.tsx`; sem `BroadcastChannel` |
 
-Não há ESLint, biblioteca de ícones, framework de formulários, biblioteca de validação de schema ou suíte de testes declarados no manifesto. Os símbolos usados nos rótulos são texto/Unicode e o controle de restauração tem SVG inline.
+Não há ESLint, biblioteca de ícones, framework de formulários ou suíte geral de testes unitários/e2e declarados no manifesto. Existe, porém, o script específico `npm.cmd run test:idempotent-migration`, que verifica invariantes da migration de atualização idempotente; ele não substitui testes de interface, integração real ou concorrência. Os símbolos usados nos rótulos são texto/Unicode e o controle de restauração tem SVG inline.
 
 ## Arquitetura e arquivos
 
@@ -62,7 +64,8 @@ Não há ESLint, biblioteca de ícones, framework de formulários, biblioteca de
 ├── .github/workflows/deploy.yml
 ├── scripts/
 │   ├── copy-404.mjs
-│   └── set-admin-password.mjs
+│   ├── set-admin-password.mjs
+│   └── validate-idempotent-migration.mjs
 ├── src/
 │   ├── assets/                 # SVGs de template e hero.png
 │   ├── components/AdminMap.tsx # Mapa e operações administrativas
@@ -83,7 +86,9 @@ Não há ESLint, biblioteca de ícones, framework de formulários, biblioteca de
 ├── index.html
 ├── package.json
 ├── package-lock.json
-├── PROMPT_RECONSTRUCAO_MAPA.md
+├── AGENTS.md                  # Persona e instruções persistentes para agentes de código
+├── PROMPT_RECONSTRUCAO.md      # Prompt de entrada resumido, revisado a partir do arquivo local legado
+├── PROMPT_RECONSTRUCAO_MAPA.md # Especificação mestre detalhada de reconstrução
 ├── PROMPT_RESTAURACAO.md       # Instruções históricas de restauração do projeto atual
 ├── tsconfig*.json
 └── vite.config.ts
@@ -98,7 +103,10 @@ Não há ESLint, biblioteca de ícones, framework de formulários, biblioteca de
 - `src/main.tsx`: renderiza `<App />` em `<StrictMode>`.
 - `scripts/copy-404.mjs`: copia `dist/index.html` para `dist/404.html` para fallback de rota do Pages. O build depende desse script; não o substitua por assumptions sobre o servidor.
 - `supabase/config.toml`: parâmetros locais (por exemplo, Postgres major 17, portas e redirects de desenvolvimento). `project_id = "Mapa_interativo"` é identificador de configuração local, não prova qual projeto remoto será usado. O arquivo referencia `./seed.sql`, mas não há `supabase/seed.sql` no inventário atual.
-- `PROMPT_RESTAURACAO.md` é um documento anterior para restaurar/operar o projeto existente. `PROMPT_RECONSTRUCAO_MAPA.md` é a especificação independente para uma reconstrução futura; nenhum dos dois substitui a necessidade de confirmar ambiente e autorização.
+- `AGENTS.md` define o fluxo de trabalho, a persona técnica, as ferramentas verificadas, as regras de segurança e a persistência esperada de qualquer agente que assumir o repositório.
+- `PROMPT_RECONSTRUCAO.md` é a versão de entrada resumida do prompt local legado, revisada para refletir a arquitetura atual e evitar instruções obsoletas.
+- `PROMPT_RECONSTRUCAO_MAPA.md` é a especificação mestre detalhada para reconstrução independente, requisitos verificáveis, lacunas e segurança.
+- `PROMPT_RESTAURACAO.md` contém orientações históricas para restaurar/operar o projeto existente. Nenhum desses arquivos substitui nova inspeção do ambiente ou autorização específica.
 
 ## Mapa público
 
@@ -109,7 +117,10 @@ Não há ESLint, biblioteca de ícones, framework de formulários, biblioteca de
 - Clicar em polígono seleciona a quadra e abre painel com código, situação e ações de situação. O mapa público não oferece criação, edição de geometria, arquivamento ou exclusão.
 - Situações e cores do polígono: `pendente` / **Pendente** (`#78858a`), `concluida` / **Concluída** (`#27ae60`), `refazer` / **Refazer** (`#e67e22`). Indicadores incluem `◷`, `✓` e `⚠`. Contadores exibem total e quantidade em cada estado.
 - Etiquetas não capturam cliques. No mapa público priorizam situação e símbolo, abreviando ou omitindo detalhes em polígonos pequenos; no administrativo também mostram o código quando há espaço.
-- CSS reduz alturas/organiza contadores e posiciona o painel de seleção acima das margens seguras em telas móveis. O controle para restaurar a visualização fica no canto do mapa; `prefers-reduced-motion` desativa animação do indicador de carregamento.
+- A tela pública usa o mapa como plano principal em `100dvh`, com fallback `100vh`, cabeçalho translúcido e indicadores flutuantes; chips podem rolar horizontalmente em telas estreitas. O enquadramento inicial compensa a área dos elementos sobrepostos.
+- O painel de seleção fica sobre o mapa e é responsivo: mobile usa margens seguras e altura máxima compacta; desktop adapta largura a partir de 641 px e pode ampliar até 440 px a partir de 1200 px.
+- A linha “Situação atual” é a única área de feedback do salvamento normal: “Aguardando…”/“Salvando…”, status final ou “Erro ao salvar”. Não existe uma linha reservada de altura fixa abaixo dos botões. O estado de erro torna o motivo disponível pelo tooltip nativo `title` e por foco de teclado; o prefixo mantém cor neutra e o texto de erro fica vermelho.
+- O controle para restaurar a visualização fica no canto superior direito do mapa. A camada base atual é OpenStreetMap; seleção de mapa-base, localização do usuário, agrupamento de zoom/localização e controle de tema ainda não foram implementados. `prefers-reduced-motion` deve ser respeitado em futuras animações.
 - Estados de inicialização, dados desatualizados, falha/indisponibilidade de conexão, armazenamento indisponível/corrompido e operação pendente são comunicados. Sem Supabase configurado, operações e autorização não são simuladas com dados locais.
 
 ## Área administrativa e autenticação
@@ -170,7 +181,7 @@ O README anterior registrava a afirmação de que a terceira migration havia sid
 
 ## Segurança e consistência de situação
 
-O comportamento a seguir foi conferido em `src/App.tsx` e migrations locais em 27/10/2026:
+O comportamento a seguir foi rechecado em `src/App.tsx` e migrations locais em 29/10/2026:
 
 1. A alteração cria UUID v4 local e persiste registro versão 2 (`quadraId`, código, situação solicitada, estado e indicador de erro) no `localStorage` antes de iniciar `atualizar_situacao_quadra`.
 2. Web Locks exclusivo usa um nome derivado da quadra para coordenar abas cooperantes da mesma origem/perfil. O lock é temporário e liberado por `finally`; sem suporte, a operação continua com coordenação apenas na aba. Um registro incerto de uma quadra não bloqueia alterações em outras quadras.
@@ -213,11 +224,12 @@ npm.cmd ci
 npm.cmd run dev
 npm.cmd run build
 npm.cmd run lint
+npm.cmd run test:idempotent-migration
 git diff --check
 npm.cmd run preview
 ```
 
-O Vite local serve em `http://localhost:5173/mapa-do-territorio/`; admin em `/mapa-do-territorio/admin`. Não há script `test` nem arquivos de teste `*.test.*`/`*.spec.*` no inventário. Não invente `npm test` como comando funcional sem adicionar deliberadamente infraestrutura.
+O Vite local serve em `http://localhost:5173/mapa-do-territorio/`; admin em `/mapa-do-territorio/admin`. Não há um runner de testes gerais nem arquivos `*.test.*`/`*.spec.*` no inventário. O script `test:idempotent-migration` é uma validação específica da migration, não uma suíte de testes do frontend. Não invente `npm test` como comando funcional sem adicionar deliberadamente infraestrutura.
 
 O script `admin:set-password` (`npm.cmd run admin:set-password -- <UUID>`) está declarado, mas altera senha: exige UUID de usuário Auth existente como argumento, `SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY` no ambiente local seguro, e senha/confirmação digitadas sem eco. **Não execute sem pedido explícito e confirmação do proprietário sobre o usuário e a ação.** Nunca armazene a chave em `VITE_*` ou documente seu valor.
 
@@ -232,22 +244,46 @@ O script `admin:set-password` (`npm.cmd run admin:set-password -- <UUID>`) está
 - A RPC v2 fornece idempotência e consulta por UUID, mas uma RPC antiga ou cliente legado não fornece UUID nem versão esperada; durante a transição, retries legados podem continuar sem idempotência lógica completa.
 - A persistência é local a navegador/perfil e pode ser perdida por limpeza ou evicção.
 - Registro incompatível/corrompido é fail-closed, mas não há ferramenta de reparo seguro na interface.
-- O estado final do Supabase remoto, grants/RLS efetivos, Auth e dados não foi consultado nesta atualização.
-- Não há testes automatizados declarados; build/lint não testam transações, grants ou falhas remotas.
+- O estado final do Supabase remoto, grants/RLS efetivos, Auth e dados não foi consultado durante esta atualização documental.
+- Não há suíte geral de testes unitários/e2e; o script `test:idempotent-migration` é uma validação especializada e não testa a interface, transações remotas ou grants efetivos.
 
 ### Itens que exigem validação externa
 
 - Confirmar, com acesso autorizado, o projeto Supabase alvo, migrations aplicadas, grants/RLS, existência do perfil admin e estado das configurações de Auth. Não inferir isso a partir de migrations ou `config.toml`.
 - Confirmar no GitHub a configuração de Pages, Actions Variables, branch de publicação e resultado do último workflow.
 - Para testar chamadas de escrita, usar projeto de desenvolvimento isolado e dados descartáveis. Não executar operações de teste em produção.
-- Planejar mecanismo remoto de operação idempotente/consultável antes de prometer desbloqueio confiável após resposta perdida.
+- Confirmar em ambiente autorizado que a migration `20261029120000_idempotent_quadra_updates.sql`, as RPCs v2/consulta e os grants correspondentes estão aplicados e compatíveis com o frontend atual. O arquivo local não comprova o estado remoto.
 
-### Próximos aprimoramentos possíveis (não implementados)
+## Plano de evolução da interface — estado em 29 de outubro de 2026
 
-- Adicionar testes locais/mocks para timeout, respostas fora de ordem, armazenamento falhando, recuperação e coordenação entre abas.
-- Desenhar um contrato de RPC/armazenamento de operações com chave idempotente e consulta de resultado; qualquer alteração no servidor precisa de proposta/revisão/autorização próprias.
-- Definir procedimento administrativo seguro para registros persistidos incompatíveis sem apagá-los cegamente.
+### Concluído
+
+- **Etapa 1 — Mapa como elemento principal:** mapa público em tela cheia; cabeçalho translúcido flutuante; contadores em chips compactos; enquadramento inicial ajustado para a área dos overlays. Commit de referência: `57b329a`.
+- **Feedback sem Layout Shift:** substituição do status na própria linha “Situação atual” durante salvamento, sucesso e erro; removida a área fixa de feedback que desperdiçava espaço vertical. Commit de referência: `b672179`.
+- **Ajustes desktop:** painel responsivo, linha de status de uma linha, tooltip de erro via `title` e foco de teclado; testes de layout em larguras aproximadas de 684 px e 1664 px mostraram altura da linha e posição dos botões estáveis entre os estados. Commit de referência: `95b6993`.
+
+### Próximas etapas de interface — pendentes
+
+1. **Mapa-base em Administração:** adicionar seletor para OpenStreetMap (atual) e CARTO Positron minimalista, disponível apenas na área administrativa conforme a decisão de produto. Trocar somente a camada `TileLayer`; manter quadras, geometria GeoJSON, situação, seleção e histórico intactos. Antes da implementação, confirmar endpoint permitido, atribuição exigida e termos/limites do provedor escolhido; não incorporar URL antiga sem validar.
+2. **Controles do mapa:** agrupar “Minha localização” e zoom `+ / −` no canto inferior direito, com alvos acessíveis e espaçamento seguro para o painel de quadra e as margens do dispositivo. Usar a API de geolocalização do navegador com permissão e falha tratada sem bloquear o mapa.
+3. **Tema na área administrativa:** adicionar a preferência de tema na área administrativa, sem criar um botão isolado no mapa público. Não foi encontrado um controle de tema na inspeção do código atual; confirmar a experiência desejada antes de implementá-la. Definir se o tema é local por navegador ou compartilhado antes de decidir onde persistir.
+4. **Rótulos conforme zoom:** ocultar os textos dos rótulos quando o zoom for menor que 15 e mostrá-los a partir de 15, sincronizando renderização inicial e evento `zoomend` nos mapas público e administrativo. Manter polígonos visíveis, selecionáveis e clicáveis; a mudança afeta somente os rótulos.
+
+### Melhorias técnicas recomendadas — pendentes
+
+- Criar testes automatizados/mocks para timeout, resposta atrasada, respostas fora de ordem, conflito de versão, falha de `localStorage`, recarga e coordenação entre abas; manter `npm.cmd run test:idempotent-migration` para verificar a migration, sem tratá-lo como suíte de UI.
+- Definir e testar procedimento seguro de diagnóstico/recuperação para registros locais incompatíveis ou corrompidos; nunca apagar estado incerto cegamente só para liberar os botões.
+- Validar em ambiente autorizado o estado real do Supabase (migration `20261029120000_idempotent_quadra_updates.sql`, grants, RLS, RPCs e perfil administrativo), sem presumir que migrations locais já estejam aplicadas.
+- Considerar mecanismos adicionais de consulta/remediação de operações incertas no servidor. A RPC v2 e a tabela idempotente existem no conjunto de migrations local; qualquer alteração adicional de banco exige proposta, ambiente isolado, autorização e validação próprios.
+- Definir uma pequena suíte de regressão visual para viewport mobile, desktop estreito, desktop largo, estados de carregamento/sucesso/erro, acessibilidade e tooltip.
+
+Os itens deste plano são sugestões de continuidade, não funcionalidades já entregues. Atualize o status somente depois de alterar código, rodar validações e registrar evidências.
 
 ## Documentação de reconstrução
 
-[`PROMPT_RECONSTRUCAO_MAPA.md`](PROMPT_RECONSTRUCAO_MAPA.md) é um prompt independente para orientar outro agente na reconstrução integral. Ele inclui contexto técnico verificado, critérios de aceitação, plano por etapas, regras de segurança e lacunas. Para continuar este checkout existente, consulte também [`PROMPT_RESTAURACAO.md`](PROMPT_RESTAURACAO.md), observando que nenhuma instrução nele substitui autorização específica para operação remota, alteração de senha, publicação ou mudança destrutiva.
+- [`AGENTS.md`](AGENTS.md): persona/skill com práticas de trabalho, ferramentas, segurança, fluxo de validação e instrução explícita de persistência diante de erros.
+- [`PROMPT_RECONSTRUCAO.md`](PROMPT_RECONSTRUCAO.md): prompt conciso migrado e revisado a partir do arquivo legado encontrado em outra pasta local; serve como ponto de entrada.
+- [`PROMPT_RECONSTRUCAO_MAPA.md`](PROMPT_RECONSTRUCAO_MAPA.md): prompt mestre com contexto técnico, migrations, critérios, lacunas e plano de evolução.
+- [`PROMPT_RESTAURACAO.md`](PROMPT_RESTAURACAO.md): orientações históricas para retomar o checkout existente.
+
+Esses arquivos são referências de contexto, não substituem a inspeção do ambiente nem autorização específica para operações remotas, alteração de senha, publicação ou ações destrutivas.
