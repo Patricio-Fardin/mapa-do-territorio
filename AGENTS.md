@@ -68,13 +68,13 @@ Execute `npm.cmd run dev` ou `npm.cmd run preview` quando a validação visual l
 - O feedback de alteração de situação substitui o texto da linha “Situação atual”: “Aguardando…”/“Salvando…”, status final ou “Erro ao salvar”. Não recrie uma área fixa abaixo dos botões.
 - O painel é responsivo no mobile e desktop. A linha de status permanece em uma linha; erro fica vermelho e o detalhe é exposto pelo atributo `title`, com foco de teclado disponível.
 - Validações recentes registraram build e lint aprovados e uma simulação de layout em larguras desktop estreita e ampla, com altura da linha e posição dos botões estáveis. Isso não substitui testes automatizados de regressão.
+- Seletor administrativo OSM/CARTO Positron implementado: preferência local em `localStorage`, camada `MapContainer` preservada, atribuição visível e nenhuma chamada de escrita ao Supabase por mudança de estilo. Endpoint testado e retornou HTTP 200 `image/png` no ambiente atual; o teste não substitui smoke test visual.
 
 ### Próximas etapas de interface ainda pendentes
 
-1. Adicionar seletor administrativo de mapa-base OpenStreetMap/CARTO Positron, preservando as camadas GeoJSON e atribuições do provedor.
-2. Agrupar localização do usuário e zoom `+`/`−` no canto inferior direito; geolocalização deve pedir permissão e tratar recusas/falhas.
-3. Remover o botão de tema isolado do mapa público (se presente na versão alvo) e transferir a preferência para a área administrativa; decidir se a preferência é local ou compartilhada.
-4. Ocultar textos dos rótulos abaixo do zoom 15 e mostrá-los no zoom 15 ou superior, atualizando a sincronização inicial e em `zoomend` nos mapas público e administrativo. Polígonos continuam clicáveis.
+1. Agrupar localização do usuário e zoom `+`/`−` no canto inferior direito; geolocalização deve pedir permissão e tratar recusas/falhas.
+2. Remover o botão de tema isolado do mapa público (se presente na versão alvo) e transferir a preferência para a área administrativa; decidir se a preferência é local ou compartilhada.
+3. Ocultar textos dos rótulos abaixo do zoom 15 e mostrá-los no zoom 15 ou superior, atualizando a sincronização inicial e em `zoomend` nos mapas público e administrativo. Polígonos continuam clicáveis.
 
 Consulte a seção “Plano de evolução da interface” do README antes de escolher o próximo item e atualize a lista quando uma etapa for comprovadamente concluída.
 

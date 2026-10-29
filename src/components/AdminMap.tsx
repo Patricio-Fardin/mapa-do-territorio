@@ -19,6 +19,20 @@ type Props = { adminEmail: string; onUnauthorized: () => void }
 const CORES: Record<Situacao, string> = { pendente: '#78858a', concluida: '#27ae60', refazer: '#e67e22' }
 const NOMES: Record<Situacao, string> = { pendente: 'Pendente', concluida: 'Concluída', refazer: 'Refazer' }
 const CENTRO: [number, number] = [-20.6353, -40.7498]
+type AdminBasemap = 'osm' | 'carto'
+const ADMIN_BASEMAP_STORAGE_KEY = 'mapa-territorios:admin-basemap:v1'
+const OSM_TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
+const CARTO_TILE_URL = `https://basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}{r}.png?key=${import.meta.env.VITE_CARTO_BASEMAP_KEY ?? ''}`
+const BASEMAP_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap contributors</a>, &copy; <a href="https://carto.com/attribution/" target="_blank" rel="noopener noreferrer">CARTO</a>'
+
+function carregarPreferenciaBaseMap(): AdminBasemap {
+  if (!import.meta.env.VITE_CARTO_BASEMAP_KEY) return 'osm'
+  try {
+    return window.localStorage.getItem(ADMIN_BASEMAP_STORAGE_KEY) === 'carto' ? 'carto' : 'osm'
+  } catch {
+    return 'osm'
+  }
+}
 
 function aplicarEstilo(layer: L.Layer, situacao: Situacao) {
   ;(layer as L.Path).setStyle({ color: CORES[situacao], fillColor: CORES[situacao], fillOpacity: .42, opacity: .95, weight: 2 })
@@ -352,7 +366,16 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [baseMap, setBaseMap] = useState<AdminBasemap>(carregarPreferenciaBaseMap)
   const operationLock = useRef(false)
+  const selecionarBaseMap = useCallback((nextBaseMap: AdminBasemap) => {
+    setBaseMap(nextBaseMap)
+    try {
+      window.localStorage.setItem(ADMIN_BASEMAP_STORAGE_KEY, nextBaseMap)
+    } catch {
+      // A preferência permanece ativa nesta sessão mesmo se o armazenamento estiver indisponível.
+    }
+  }, [])
   const loadVersion = useRef(0)
   const selected = quadras.find((quadra) => quadra.id === selectedId) ?? null
   const selectedArchived = quadrasArquivadas.find((quadra) => quadra.id === archivedSelectedId) ?? null
@@ -670,10 +693,36 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
       </form>}
       {(loading || busy) && <p role="status">{loading ? 'Carregando quadras…' : 'Processando operação administrativa…'}</p>}
       {message && <p role="alert">{message}</p>}
+      <div className="admin-basemap-control" role="group" aria-label="Fundo do mapa administrativo">
+        <span className="admin-basemap-label">Fundo do mapa</span>
+        <div className="admin-basemap-options">
+          <button
+            type="button"
+            className={baseMap === 'osm' ? 'admin-basemap-option is-active' : 'admin-basemap-option'}
+            aria-pressed={baseMap === 'osm'}
+            onClick={() => selecionarBaseMap('osm')}
+          >
+            Padrão (OSM)
+          </button>
+          <button
+            type="button"
+            className={baseMap === 'carto' ? 'admin-basemap-option is-active' : 'admin-basemap-option'}
+            aria-pressed={baseMap === 'carto'}
+            onClick={() => selecionarBaseMap('carto')}
+            disabled={!import.meta.env.VITE_CARTO_BASEMAP_KEY}
+            title={import.meta.env.VITE_CARTO_BASEMAP_KEY ? 'Usar o mapa minimalista da CARTO' : 'Configure VITE_CARTO_BASEMAP_KEY para habilitar o mapa CARTO'}
+          >
+            Minimalista (CARTO)
+          </button>
+        </div>
+      </div>
       <div className="map-card admin-map-card">
         <MapContainer center={CENTRO} zoom={14} zoomControl={false} className="map">
           <ZoomControl position="bottomright" />
-          <TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+          <TileLayer
+            attribution={BASEMAP_ATTRIBUTION}
+            url={baseMap === 'carto' && import.meta.env.VITE_CARTO_BASEMAP_KEY ? CARTO_TILE_URL : OSM_TILE_URL}
+          />
           <AdminDrawingMap
             quadras={quadras}
             selectedId={selectedId}

@@ -21,6 +21,7 @@ Perfis declarados no schema local:
 - Rótulos permanentes adaptáveis ao tamanho do polígono.
 - Autenticação administrativa por alias e senha Supabase; recuperação de senha por link é fluxo separado.
 - Desenho de novas quadras, edição de geometrias, consulta de quadras arquivadas, arquivamento e exclusão definitiva protegida por confirmação.
+- Na área administrativa, alternância entre OpenStreetMap e CARTO Positron (`light_all`), com preferência gravada no `localStorage`; trocar o fundo atualiza apenas a URL da camada de tiles e não escreve no Supabase.
 - Leituras paginadas do Supabase e atualização por Realtime quando disponível, além de atualização periódica.
 - Proteção local diagnóstica contra operações de situação incertas, coordenada por quadra entre abas cooperantes pelo Web Locks API quando disponível; falhas não bloqueiam indefinidamente o mapa.
 - A migration `20261029120000_idempotent_quadra_updates.sql` adiciona idempotência por UUID e versão otimista para novas alterações, sem remover a RPC legada.
@@ -52,7 +53,8 @@ Versões declaradas vêm de `package.json`; versões efetivamente instaladas for
 | npm | Não declarado em `engines` | `11.19.0` neste ambiente | `package-lock.json` v3 e comandos npm |
 | Git | Não é dependência do app | `2.56.0.windows.2` neste ambiente | Controle de versão |
 | GitHub Actions / Pages | Actions `checkout@v4`, `setup-node@v4`, `configure-pages@v5`, `upload-pages-artifact@v3`, `deploy-pages@v4` | Runner `ubuntu-latest`; versões indicadas no YAML | `.github/workflows/deploy.yml` |
-| OpenStreetMap | Serviço externo, sem versão npm | Não aplicável | Tiles e atribuição em `src/App.tsx` |
+| OpenStreetMap | Serviço externo, sem versão npm | Não aplicável | Tiles e atribuição em `src/App.tsx` e `src/components/AdminMap.tsx` |
+| CARTO Basemaps | Serviço externo, sem versão npm | Não aplicável | Tiles Positron raster (`light_all`) exclusivo da área administrativa; exige chave pública `VITE_CARTO_BASEMAP_KEY` e atribuição OSM/CARTO |
 | Web Locks, `localStorage`, evento `storage` | APIs do navegador | Depende do navegador | Coordenação/persistência em `src/App.tsx`; sem `BroadcastChannel` |
 
 Não há ESLint, biblioteca de ícones, framework de formulários ou suíte geral de testes unitários/e2e declarados no manifesto. Existe, porém, o script específico `npm.cmd run test:idempotent-migration`, que verifica invariantes da migration de atualização idempotente; ele não substitui testes de interface, integração real ou concorrência. Os símbolos usados nos rótulos são texto/Unicode e o controle de restauração tem SVG inline.
@@ -120,7 +122,7 @@ Não há ESLint, biblioteca de ícones, framework de formulários ou suíte gera
 - A tela pública usa o mapa como plano principal em `100dvh`, com fallback `100vh`, cabeçalho translúcido e indicadores flutuantes; chips podem rolar horizontalmente em telas estreitas. O enquadramento inicial compensa a área dos elementos sobrepostos.
 - O painel de seleção fica sobre o mapa e é responsivo: mobile usa margens seguras e altura máxima compacta; desktop adapta largura a partir de 641 px e pode ampliar até 440 px a partir de 1200 px.
 - A linha “Situação atual” é a única área de feedback do salvamento normal: “Aguardando…”/“Salvando…”, status final ou “Erro ao salvar”. Não existe uma linha reservada de altura fixa abaixo dos botões. O estado de erro torna o motivo disponível pelo tooltip nativo `title` e por foco de teclado; o prefixo mantém cor neutra e o texto de erro fica vermelho.
-- O controle para restaurar a visualização fica no canto superior direito do mapa. A camada base atual é OpenStreetMap; seleção de mapa-base, localização do usuário, agrupamento de zoom/localização e controle de tema ainda não foram implementados. `prefers-reduced-motion` deve ser respeitado em futuras animações.
+- O controle para restaurar a visualização fica no canto superior direito do mapa. O mapa público continua usando OpenStreetMap sem seletor de fundo; o seletor OSM/CARTO está limitado à área administrativa. Localização do usuário, agrupamento de zoom/localização e controle de tema ainda não foram implementados. `prefers-reduced-motion` deve ser respeitado em futuras animações.
 - Estados de inicialização, dados desatualizados, falha/indisponibilidade de conexão, armazenamento indisponível/corrompido e operação pendente são comunicados. Sem Supabase configurado, operações e autorização não são simuladas com dados locais.
 
 ## Área administrativa e autenticação
@@ -209,6 +211,7 @@ A RPC legada usa `public.gen_random_uuid()`, fornecida pela extensão `pgcrypto`
 ```dotenv
 VITE_SUPABASE_URL=https://seu-projeto.supabase.co
 VITE_SUPABASE_PUBLISHABLE_KEY=sua-chave-publica-do-supabase
+VITE_CARTO_BASEMAP_KEY=sua-chave-publica-do-carto
 VITE_ADMIN_USERNAME=admin
 VITE_ADMIN_LOGIN_EMAIL=admin@example.com
 ```
@@ -235,7 +238,7 @@ O script `admin:set-password` (`npm.cmd run admin:set-password -- <UUID>`) está
 
 ### GitHub Pages
 
-`.github/workflows/deploy.yml` inicia no push a `main` ou `workflow_dispatch`, usa Ubuntu, Node 24 e `npm ci`; faz `npm run build`, configura Pages, carrega `dist` e publica. O build precisa das Actions Variables públicas `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_ADMIN_USERNAME` e `VITE_ADMIN_LOGIN_EMAIL`. URL do site configurada no projeto: `https://patricio-fardin.github.io/mapa-do-territorio/`. A configuração é declarativa; não prova que Pages esteja habilitado ou que uma execução esteja verde. Não há script de publicação local: o deploy é feito pelo workflow.
+`.github/workflows/deploy.yml` inicia no push a `main` ou `workflow_dispatch`, usa Ubuntu, Node 24 e `npm ci`; faz `npm run build`, configura Pages, carrega `dist` e publica. O build lê as Actions Variables públicas `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_ADMIN_USERNAME` e `VITE_ADMIN_LOGIN_EMAIL`. A chave CARTO de uso no navegador é definida como `VITE_CARTO_BASEMAP_KEY` no próprio workflow e também pode ser fornecida em `.env.local`; é uma chave pública, incluída no bundle, e deve ter restrições de domínio configuradas no painel CARTO. O código mantém a atribuição a OpenStreetMap e CARTO. Verifique os termos, limites de uso e enquadramento aplicável antes do uso institucional em produção. URL do site configurada no projeto: `https://patricio-fardin.github.io/mapa-do-territorio/`. A configuração é declarativa; não prova que Pages esteja habilitado ou que uma execução esteja verde. Não há script de publicação local: o deploy é feito pelo workflow.
 
 ## Limitações, pendências e validação necessária
 
@@ -260,14 +263,13 @@ O script `admin:set-password` (`npm.cmd run admin:set-password -- <UUID>`) está
 
 - **Etapa 1 — Mapa como elemento principal:** mapa público em tela cheia; cabeçalho translúcido flutuante; contadores em chips compactos; enquadramento inicial ajustado para a área dos overlays. Commit de referência: `57b329a`.
 - **Feedback sem Layout Shift:** substituição do status na própria linha “Situação atual” durante salvamento, sucesso e erro; removida a área fixa de feedback que desperdiçava espaço vertical. Commit de referência: `b672179`.
-- **Ajustes desktop:** painel responsivo, linha de status de uma linha, tooltip de erro via `title` e foco de teclado; testes de layout em larguras aproximadas de 684 px e 1664 px mostraram altura da linha e posição dos botões estáveis entre os estados. Commit de referência: `95b6993`.
+- **Alternância de mapa-base administrativo:** seletor entre OpenStreetMap e CARTO Positron (`light_all`), preferência local em `localStorage`, atribuição visível a OSM/CARTO e nenhuma escrita no Supabase. O componente `MapContainer` não é recriado; a seleção/estado das quadras permanece no componente administrativo.
 
 ### Próximas etapas de interface — pendentes
 
-1. **Mapa-base em Administração:** adicionar seletor para OpenStreetMap (atual) e CARTO Positron minimalista, disponível apenas na área administrativa conforme a decisão de produto. Trocar somente a camada `TileLayer`; manter quadras, geometria GeoJSON, situação, seleção e histórico intactos. Antes da implementação, confirmar endpoint permitido, atribuição exigida e termos/limites do provedor escolhido; não incorporar URL antiga sem validar.
-2. **Controles do mapa:** agrupar “Minha localização” e zoom `+ / −` no canto inferior direito, com alvos acessíveis e espaçamento seguro para o painel de quadra e as margens do dispositivo. Usar a API de geolocalização do navegador com permissão e falha tratada sem bloquear o mapa.
-3. **Tema na área administrativa:** adicionar a preferência de tema na área administrativa, sem criar um botão isolado no mapa público. Não foi encontrado um controle de tema na inspeção do código atual; confirmar a experiência desejada antes de implementá-la. Definir se o tema é local por navegador ou compartilhado antes de decidir onde persistir.
-4. **Rótulos conforme zoom:** ocultar os textos dos rótulos quando o zoom for menor que 15 e mostrá-los a partir de 15, sincronizando renderização inicial e evento `zoomend` nos mapas público e administrativo. Manter polígonos visíveis, selecionáveis e clicáveis; a mudança afeta somente os rótulos.
+1. **Controles do mapa:** agrupar “Minha localização” e zoom `+ / −` no canto inferior direito, com alvos acessíveis e espaçamento seguro para o painel de quadra e as margens do dispositivo. Usar a API de geolocalização do navegador com permissão e falha tratada sem bloquear o mapa.
+2. **Tema na área administrativa:** adicionar a preferência de tema na área administrativa, sem criar um botão isolado no mapa público. Não foi encontrado um controle de tema na inspeção do código atual; confirmar a experiência desejada antes de implementá-la. Definir se o tema é local por navegador ou compartilhado antes de decidir onde persistir.
+3. **Rótulos conforme zoom:** ocultar os textos dos rótulos quando o zoom for menor que 15 e mostrá-los a partir de 15, sincronizando renderização inicial e evento `zoomend` nos mapas público e administrativo. Manter polígonos visíveis, selecionáveis e clicáveis; a mudança afeta somente os rótulos.
 
 ### Melhorias técnicas recomendadas — pendentes
 

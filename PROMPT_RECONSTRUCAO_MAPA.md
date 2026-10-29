@@ -302,13 +302,13 @@ Não substitua nenhuma dessas lacunas por credenciais fictícias apresentadas co
 - Mapa público em tela cheia, cabeçalho translúcido e chips de indicadores flutuantes; enquadramento inicial compensando os overlays (`57b329a`).
 - Feedback de situação em linha, sem área de altura fixa abaixo dos botões: “Salvando…”/estado final/“Erro ao salvar” (`b672179`).
 - Ajuste do painel para desktop, status de uma linha, tooltip `title`, cor de erro e foco de teclado (`95b6993`). A simulação visual local observou a linha com altura constante e posição dos botões estável em janelas desktop estreita e ampla; isso não é substituto para uma suíte automatizada.
+- Seletor administrativo OSM/CARTO Positron (`light_all`) com `localStorage`, atribuição de ambos os provedores e atualização da URL da camada sem recriar o `MapContainer`; build, lint, validação estática existente e verificação HTTP do endpoint aprovados.
 
 ### Pendências de interface
 
-1. **Mapa-base administrativo:** escolher OSM ou CARTO Positron por troca de `TileLayer`, sem alterar dados GeoJSON/status. Confirmar endpoint, atribuição e termos atuais do provedor antes de codificar.
-2. **Controles:** agrupar geolocalização e zoom `+`/`−` no canto inferior direito, respeitando permissão de geolocalização, safe areas e painel de seleção.
-3. **Tema:** mover a escolha de tema para a área administrativa e remover o controle de tema isolado da interface pública se ainda estiver presente na versão alvo. Definir persistência local ou compartilhada antes de escolher armazenamento.
-4. **Rótulos por zoom:** ocultar o texto do rótulo em zoom menor que 15 e exibi-lo em zoom 15 ou superior, tanto no mapa público quanto no administrativo; não ocultar ou desativar os polígonos.
+1. **Controles:** agrupar geolocalização e zoom `+`/`−` no canto inferior direito, respeitando permissão de geolocalização, safe areas e painel de seleção.
+2. **Tema:** mover a escolha de tema para a área administrativa e remover o controle de tema isolado da interface pública se ainda estiver presente na versão alvo. Definir persistência local ou compartilhada antes de escolher armazenamento.
+3. **Rótulos por zoom:** ocultar o texto do rótulo em zoom menor que 15 e exibi-lo em zoom 15 ou superior, tanto no mapa público quanto no administrativo; não ocultar ou desativar os polígonos.
 
 ### Pendências técnicas/documentais
 

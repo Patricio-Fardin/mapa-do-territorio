@@ -53,6 +53,13 @@ button:hover { border-color: #287f73; }
 .admin-page-wide { width: min(1200px, calc(100% - 2rem)); }
 .admin-map { display: grid; gap: .75rem; }
 .admin-map-toolbar { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(180px, .7fr) minmax(260px, 1fr); align-items: center; gap: .8rem; }
+.admin-basemap-control { display: flex; align-items: center; justify-content: flex-start; flex-wrap: wrap; gap: .65rem; min-height: 48px; padding: .35rem .6rem; border: 1px solid #d9e3e4; border-radius: .65rem; background: #fff; }
+.admin-basemap-label { color: #24474d; font-size: .9rem; font-weight: 700; }
+.admin-basemap-options { display: inline-flex; align-items: stretch; gap: .3rem; }
+.admin-basemap-option { min-height: 36px; padding: .45rem .75rem; border: 1px solid #c8d7d9; border-radius: .45rem; background: #f6f9f9; color: #24474d; font: inherit; font-size: .88rem; font-weight: 600; line-height: 1.2; cursor: pointer; }
+.admin-basemap-option.is-active { border-color: #17636c; background: #e6f2f3; color: #104a51; box-shadow: inset 0 0 0 1px #17636c; }
+.admin-basemap-option:focus-visible { outline: 3px solid #3a8791; outline-offset: 2px; }
+.admin-basemap-option:disabled { opacity: .55; cursor: not-allowed; }
 .admin-status { grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0; }
 .admin-map-toolbar label { display: grid; gap: .35rem; color: #24474d; font-size: .9rem; font-weight: 700; }
 .admin-map-toolbar select { width: 100%; min-height: 42px; padding: .55rem; border: 1px solid #c8d7d9; border-radius: .45rem; background: #fff; font: inherit; }

@@ -19,7 +19,7 @@ Manter uma aplicação web responsiva para visualizar e administrar quadras terr
 - React 19, TypeScript e Vite.
 - Leaflet, React-Leaflet e Leaflet Draw.
 - Supabase JS para Auth, consultas/RPC e Realtime.
-- OpenStreetMap como mapa-base atualmente implementado.
+- OpenStreetMap no mapa público; área administrativa permite alternar entre OSM e CARTO Positron com preferência local no navegador.
 - GitHub Actions e GitHub Pages para build/publicação.
 - Oxlint para lint; há validação específica de migration por `npm.cmd run test:idempotent-migration`. Não há uma suíte geral de testes unitários/e2e no inventário documentado.
 
@@ -35,6 +35,7 @@ Use sempre `package.json`, `package-lock.json`, configurações e migrations atu
 6. Área administrativa autenticada, listagem de quadras ativas/arquivadas, desenho/edição de Polygon/MultiPolygon, criação, arquivamento e exclusão permanente protegida.
 7. Leitura paginada, atualização Realtime quando disponível e atualização periódica.
 8. Mecanismo cliente para coordenar e diagnosticar atualizações de situação incertas e migration local de atualização idempotente/versionada. Consulte o código e a migration antes de alterar esse fluxo.
+9. Seletor de mapa-base na área administrativa entre OSM e CARTO Positron (`light_all`), persistido em `localStorage`, sem recriar o `MapContainer` nem efetuar escritas no Supabase. Manter atribuição dos provedores e chave CARTO via `VITE_CARTO_BASEMAP_KEY`.
 
 ## Requisitos visuais e responsividade
 
@@ -79,7 +80,6 @@ Use sempre `package.json`, `package-lock.json`, configurações e migrations atu
 
 ## Próximas etapas de interface já identificadas
 
-- **Mapa-base no Admin:** permitir alternar OpenStreetMap e CARTO Positron, trocando apenas `TileLayer`, com endpoint válido, atribuição e termos do provedor confirmados.
 - **Controles:** agrupar “Minha localização” e zoom `+`/`−` no canto inferior direito; tratar permissão/erro de geolocalização.
 - **Tema:** mover a preferência de tema para a área administrativa e remover botão isolado do mapa público, se presente na versão alvo. Definir antes se a preferência é local ou compartilhada.
 - **Rótulos por zoom:** ocultar textos dos rótulos quando zoom < 15 e exibi-los no zoom >= 15, tanto no mapa público quanto no administrativo, sem esconder ou desabilitar os polígonos.
