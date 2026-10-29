@@ -919,11 +919,8 @@ function MapPage() {
           window.setTimeout(() => resolve({ kind: 'timeout' }), TIMEOUT_RECONCILIACAO_MS)
         }),
       ])
-      // Diferencia uma resposta válida sem registro de erros/timeout da consulta.
-      // Isso permite reconciliar operações antigas usando a versão do servidor.
-      const operacaoAusenteConfirmada = resultadoOperacao.kind === 'result'
-        && !resultadoOperacao.error
-        && resultadoOperacao.data === null
+      // A consulta da operação pode falhar ou não encontrar registros antigos.
+      // A leitura pública versionada abaixo pode confirmar o estado final por si só.
       if (resultadoOperacao.kind === 'result' && !resultadoOperacao.error && resultadoOperacao.data) {
         try {
           const operacao = respostaDaRpc(resultadoOperacao.data, pendente.quadraId)
@@ -992,13 +989,12 @@ function MapPage() {
       // mas a versão da quadra já avançou, uma tentativa antiga com a versão
       // esperada anterior não poderá gravar por cima do estado atual via RPC v2.
       if (
-        operacaoAusenteConfirmada
-        && atualPersistido.versao > pendente.versaoEsperada
+        atualPersistido.versao > pendente.versaoEsperada
         && atualPersistido.situacao === pendente.situacaoSolicitada
       ) {
         if (!resolverGravacaoTerminal(pendente.id)) return
         setQuadras((items) => items.map((quadra) => quadra.id === pendente.quadraId
-          ? { ...quadra, situacao: atualPersistido.situacao, versao: atualPersistido.versao }
+          ? { ...quadra, situacao: atualPersistido.situacao, versao: atualPersistido.versao, updatedAt: atualPersistido.updatedAt }
           : quadra))
         definirFeedback(
           pendente.quadraId,
@@ -1540,7 +1536,9 @@ function MapPage() {
               : loadError
                 ? 'Não foi possível atualizar as quadras. Os últimos dados carregados permanecem visíveis.'
                 : ''
-  const mostrarAviso = Boolean(mensagemConexao)
+  // Uma gravação local antiga não deve produzir o alerta global persistente.
+  // A reconciliação continua ativa e o detalhe é mostrado apenas ao selecionar a quadra pendente.
+  const mostrarAviso = Boolean(mensagemConexao) && !pendingSave
   const podeTentarNovamente = Boolean(client && connectionStatus !== 'loading' && !pendingSave)
 
   return (
@@ -1552,7 +1550,6 @@ function MapPage() {
       {mostrarAviso && <section className={`connection-notice${connectionStatus === 'unavailable' ? ' connection-notice--offline' : ''}`} role={connectionStatus === 'unavailable' ? 'alert' : 'status'} aria-live={connectionStatus === 'unavailable' ? 'assertive' : 'polite'}>
         {!noticeDismissed && <p>{mensagemConexao}{loadError && connectionStatus === 'unknown' ? ` ${loadError}` : ''}</p>}
         {podeTentarNovamente && <button type="button" className="retry-load" onClick={() => { setNoticeDismissed(false); void carregarQuadras(true) }} disabled={refreshing} aria-label="Tentar carregar as quadras novamente">{refreshing ? 'Atualizando…' : 'Tentar novamente'}</button>}
-        {pendingSave && <button type="button" className="retry-load" onClick={() => void consultarGravacaoIncerta()} disabled={reconcilingPendingSave} aria-label={`Consultar novamente o estado não confirmado da quadra ${pendingSave.quadraCodigo}`}>{reconcilingPendingSave ? 'Consultando…' : `Consultar quadra ${pendingSave.quadraCodigo}`}</button>}
         {quadrasCarregadas && <button type="button" className="dismiss-notice" onClick={() => setNoticeDismissed(true)} aria-label="Fechar aviso de conexão">×</button>}
       </section>}
       <section className="map-card public-map-card">
@@ -1603,13 +1600,6 @@ function MapPage() {
           </p>
           <button type="button" className="reconcile-save-button" onClick={() => void consultarGravacaoIncerta()} disabled={reconcilingPendingSave} aria-label={`Consultar novamente o estado não confirmado da quadra ${pendingSave.quadraCodigo}`}>
             {reconcilingPendingSave ? 'Consultando situação…' : 'Consultar situação novamente'}
-          </button>
-        </> : pendingSave ? <>
-          <p className="status-feedback status-feedback--warning" role="status">
-            A gravação da quadra {pendingSave.quadraCodigo} continua não confirmada. Esta pendência se refere somente a essa quadra; consulte o estado antes de repetir a alteração nela.
-          </p>
-          <button type="button" className="reconcile-save-button" onClick={() => void consultarGravacaoIncerta()} disabled={reconcilingPendingSave} aria-label={`Consultar novamente o estado não confirmado da quadra ${pendingSave.quadraCodigo}`}>
-            {reconcilingPendingSave ? 'Consultando situação…' : `Consultar quadra ${pendingSave.quadraCodigo}`}
           </button>
         </> : !podeAlterar && !savingStatus && <p className="status-feedback status-feedback--warning" role="status">
           {!client
