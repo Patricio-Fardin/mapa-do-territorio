@@ -1588,8 +1588,10 @@ function MapPage() {
                       : ''
               }`}
               aria-live="polite"
+              title={statusFeedback && statusFeedbackQuadraId === atual.id && statusFeedbackKind === 'error' ? statusFeedback : undefined}
+              tabIndex={statusFeedback && statusFeedbackQuadraId === atual.id && statusFeedbackKind === 'error' ? 0 : undefined}
             >
-              Situação atual: <strong title={statusFeedback && statusFeedbackQuadraId === atual.id && statusFeedbackKind === 'error' ? statusFeedback : undefined}>
+              Situação atual: <strong>
                 {savingStatus && statusFeedbackQuadraId === atual.id
                   ? waitingForCoordination ? 'Aguardando…' : 'Salvando…'
                   : pendingSave?.quadraId === atual.id

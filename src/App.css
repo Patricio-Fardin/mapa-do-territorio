@@ -74,18 +74,19 @@ button:hover { border-color: #287f73; }
 .admin-map-busy .leaflet-draw-toolbar { pointer-events: none; opacity: .5; }
 .sheet { position: fixed; z-index: 1000; right: 1rem; bottom: 1rem; display: grid; gap: .8rem; width: min(380px, calc(100% - 2rem)); max-height: 72vh; overflow: auto; padding: 1rem; border: 1px solid #cbdcde; border-radius: .8rem; background: #fff; box-shadow: 0 8px 28px #19323833; }
 .sheet-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: .75rem; }
-.sheet-heading h2 { margin: 0; color: #173d43; font-size: 1.05rem; }
+.sheet-heading h2 { margin: 0; overflow: hidden; color: #173d43; font-size: 1.05rem; text-overflow: ellipsis; white-space: nowrap; }
 .sheet-heading p { margin: .2rem 0 0; color: #52696e; font-size: .9rem; }
 .sheet-heading p strong { color: #173d43; }
 .sheet-heading > div { flex: 1 1 auto; min-width: 0; }
-.quadra-current-status { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.quadra-current-status { display: block; width: 100%; min-height: 1.35em; overflow: hidden; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
 .sheet-heading .quadra-current-status strong { display: inline; }
 .sheet-heading .quadra-current-status--saving,
 .sheet-heading .quadra-current-status--saving strong { color: #64748b; }
 .sheet-heading .quadra-current-status--uncertain,
 .sheet-heading .quadra-current-status--uncertain strong { color: #8a6400; }
-.sheet-heading .quadra-current-status--error,
+.sheet-heading .quadra-current-status--error { color: #52696e; cursor: help; }
 .sheet-heading .quadra-current-status--error strong { color: #b42318; }
+.sheet-heading .quadra-current-status--error:focus-visible { border-radius: 2px; outline: 2px solid #b42318; outline-offset: 2px; }
 .close { flex: 0 0 48px; min-height: 48px; border: 1px solid #c8d7d9; font-size: 1.6rem; line-height: 1; padding: .1rem .4rem; }
 .status-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .55rem; }
 .status-button { min-height: 52px; padding: .5rem; border: 2px solid transparent; color: #fff; font-size: .85rem; font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; touch-action: manipulation; }
@@ -98,6 +99,16 @@ button:hover { border-color: #287f73; }
 .status-feedback { margin: 0; color: #287f73; font-size: .9rem; font-weight: 700; }
 .status-feedback--error, .status-feedback--warning { color: #856404; }
 .reconcile-save-button { justify-self: start; min-height: 44px; border-color: #9c7b20; color: #695313; font-weight: 700; }
+@media (min-width: 641px) {
+  .sheet { width: min(420px, calc(100vw - 2rem)); right: 1.25rem; bottom: 1.25rem; }
+  .sheet-heading { gap: 1rem; }
+  .sheet-heading h2 { font-size: 1.1rem; }
+  .quadra-current-status { min-height: 1.35em; line-height: 1.35; }
+}
+@media (min-width: 1200px) {
+  .sheet { width: min(440px, calc(100vw - 2.5rem)); padding: 1.15rem 1.2rem; gap: .9rem; }
+  .sheet-heading { gap: 1.1rem; }
+}
 @media (max-width: 760px) { .admin-map-toolbar { grid-template-columns: 1fr; } .admin-archive-tools { grid-template-columns: 1fr; } .admin-status { grid-template-columns: repeat(2, 1fr); } .admin-map-card .map { min-height: 430px; } }
 @media (max-width: 640px) {
   .status-panel { grid-template-columns: repeat(2, 1fr); }
