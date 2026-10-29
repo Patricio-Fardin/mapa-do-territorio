@@ -1577,7 +1577,28 @@ function MapPage() {
         <div className="sheet-heading">
           <div>
             <h2 id="selected-quadra-title">Quadra {atual.codigo}</h2>
-            <p>Situação atual: <strong>{NOMES[atual.situacao]}</strong></p>
+            <p
+              className={`quadra-current-status${
+                savingStatus && statusFeedbackQuadraId === atual.id
+                  ? ' quadra-current-status--saving'
+                  : pendingSave?.quadraId === atual.id
+                    ? ' quadra-current-status--uncertain'
+                    : statusFeedback && statusFeedbackQuadraId === atual.id && statusFeedbackKind === 'error'
+                      ? ' quadra-current-status--error'
+                      : ''
+              }`}
+              aria-live="polite"
+            >
+              Situação atual: <strong title={statusFeedback && statusFeedbackQuadraId === atual.id && statusFeedbackKind === 'error' ? statusFeedback : undefined}>
+                {savingStatus && statusFeedbackQuadraId === atual.id
+                  ? waitingForCoordination ? 'Aguardando…' : 'Salvando…'
+                  : pendingSave?.quadraId === atual.id
+                    ? reconcilingPendingSave ? 'Verificando…' : 'Não confirmada'
+                    : statusFeedback && statusFeedbackQuadraId === atual.id && statusFeedbackKind === 'error'
+                      ? 'Erro ao salvar'
+                      : NOMES[atual.situacao]}
+              </strong>
+            </p>
           </div>
           <button type="button" className="close" onClick={() => { selectedRef.current = null; setSelected(null); setStatusFeedback(''); setStatusFeedbackQuadraId(null) }} aria-label="Fechar painel">×</button>
         </div>
@@ -1603,23 +1624,6 @@ function MapPage() {
             {reconcilingPendingSave ? 'Consultando situação…' : 'Consultar situação novamente'}
           </button>
         </>}
-        <div className="status-feedback-slot">
-          {!podeAlterar && !savingStatus && !pendingSave ? (
-            <p className="status-feedback status-feedback--warning" role="status">
-              {!client
-                ? 'O servidor não está configurado; as situações não podem ser salvas.'
-                : connectionStatus === 'loading' || refreshing
-                  ? 'Aguardando a confirmação dos dados do servidor…'
-                  : 'Não é possível alterar situações até que os dados atuais sejam confirmados pelo servidor.'}
-            </p>
-          ) : savingStatus ? (
-            <p className="status-feedback status-feedback--busy" role="status"><span className="status-spinner" aria-hidden="true" />{waitingForCoordination ? 'Aguardando coordenação segura entre abas…' : 'Salvando situação…'}</p>
-          ) : !pendingSave && statusFeedback && statusFeedbackQuadraId === atual.id ? (
-            <p className={`status-feedback status-feedback--${statusFeedbackKind}`} role={statusFeedbackKind === 'error' ? 'alert' : 'status'}>{statusFeedback}</p>
-          ) : (
-            <p className="status-feedback status-feedback--empty" aria-hidden="true">&nbsp;</p>
-          )}
-        </div>
       </aside>}
     </main>
   )
