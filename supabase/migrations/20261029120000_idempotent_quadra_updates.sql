@@ -71,10 +71,32 @@ begin
   ) into tem_pk;
   if not tem_pk then raise exception 'Schema incompatível: chave primária de operacoes_situacao_quadras.operacao_id ausente'; end if;
   select exists (
-    select 1 from pg_catalog.pg_constraint c
-     where c.conrelid = 'public.operacoes_situacao_quadras'::regclass
-       and c.contype = 'f'
-       and pg_catalog.pg_get_constraintdef(c.oid) like '%(quadra_id)%public.quadras%'
+    select 1
+      from pg_catalog.pg_constraint fk
+      join pg_catalog.pg_class src_rel
+        on src_rel.oid = fk.conrelid
+      join pg_catalog.pg_namespace src_ns
+        on src_ns.oid = src_rel.relnamespace
+      join pg_catalog.pg_class dst_rel
+        on dst_rel.oid = fk.confrelid
+      join pg_catalog.pg_namespace dst_ns
+        on dst_ns.oid = dst_rel.relnamespace
+      join pg_catalog.pg_attribute src_col
+        on src_col.attrelid = fk.conrelid
+       and src_col.attnum = fk.conkey[1]
+      join pg_catalog.pg_attribute dst_col
+        on dst_col.attrelid = fk.confrelid
+       and dst_col.attnum = fk.confkey[1]
+     where fk.contype = 'f'
+       and src_ns.nspname = 'public'
+       and src_rel.relname = 'operacoes_situacao_quadras'
+       and src_col.attname = 'quadra_id'
+       and dst_ns.nspname = 'public'
+       and dst_rel.relname = 'quadras'
+       and dst_col.attname = 'id'
+       and pg_catalog.cardinality(fk.conkey) = 1
+       and pg_catalog.cardinality(fk.confkey) = 1
+       and fk.confdeltype = 'r'
   ) into tem_fk;
   if not tem_fk then raise exception 'Schema incompatível: FK de operacoes_situacao_quadras.quadra_id ausente'; end if;
 end;
