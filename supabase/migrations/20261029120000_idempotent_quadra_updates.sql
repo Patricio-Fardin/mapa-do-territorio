@@ -18,7 +18,8 @@ begin
      and c.table_name = 'situacoes_quadras'
      and c.column_name = 'versao';
   if tipo is distinct from 'integer' or nulo is distinct from 'NO'
-     or padrao not in ('0', '0::integer', '(0)' , '(0)::integer') then
+     or padrao is null
+     or padrao not in ('0', '0::integer', '(0)', '(0)::integer') then
     raise exception 'Schema incompatível: public.situacoes_quadras.versao deve ser integer NOT NULL DEFAULT 0';
   end if;
 end;
@@ -79,12 +80,12 @@ begin
 end;
 $$;
 
-create or replace function public.atualizar_situacao_quadra_v2(
+create or replace function public.aplicar_situacao_quadra_idempotente(
   p_operacao_id uuid,
   p_quadra_id uuid,
   p_situacao public.situacao_quadra,
   p_observacao text default null,
-  p_versao_esperada integer default null
+  p_versao_esperada integer
 )
 returns jsonb
 language plpgsql
@@ -195,6 +196,30 @@ begin
 end;
 $$;
 
+revoke all on function public.aplicar_situacao_quadra_idempotente(uuid, uuid, public.situacao_quadra, text, integer) from public, anon, authenticated;
+
+create or replace function public.atualizar_situacao_quadra_v2(
+  p_operacao_id uuid,
+  p_quadra_id uuid,
+  p_situacao public.situacao_quadra,
+  p_observacao text,
+  p_versao_esperada integer
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if p_versao_esperada is null then
+    raise exception 'p_versao_esperada é obrigatório para a RPC v2';
+  end if;
+  return public.aplicar_situacao_quadra_idempotente(
+    p_operacao_id, p_quadra_id, p_situacao, p_observacao, p_versao_esperada
+  );
+end;
+$$;
+
 revoke all on function public.atualizar_situacao_quadra_v2(uuid, uuid, public.situacao_quadra, text, integer) from public, anon, authenticated;
 grant execute on function public.atualizar_situacao_quadra_v2(uuid, uuid, public.situacao_quadra, text, integer) to anon, authenticated;
 
@@ -227,7 +252,7 @@ security definer
 set search_path = ''
 as $$
 begin
-  return public.atualizar_situacao_quadra_v2(
+  return public.aplicar_situacao_quadra_idempotente(
     public.gen_random_uuid(), p_quadra_id, p_situacao, p_observacao, null
   );
 end;
