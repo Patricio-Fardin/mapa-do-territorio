@@ -947,7 +947,8 @@ function MapPage() {
             setQuadras((items) => items.map((quadra) => quadra.id === pendente.quadraId
               ? { ...quadra, situacao: situacaoAtual, versao: operacao.versao ?? quadra.versao }
               : quadra))
-            definirFeedback(pendente.quadraId, `Operação da quadra ${pendente.quadraCodigo} confirmada pelo servidor (${operacao.status}).`, 'success')
+            setStatusFeedback('')
+            setStatusFeedbackQuadraId(null)
             return
           }
         } catch {
@@ -996,13 +997,10 @@ function MapPage() {
         setQuadras((items) => items.map((quadra) => quadra.id === pendente.quadraId
           ? { ...quadra, situacao: atualPersistido.situacao, versao: atualPersistido.versao, updatedAt: atualPersistido.updatedAt }
           : quadra))
-        definirFeedback(
-          pendente.quadraId,
-          atualPersistido.situacao === pendente.situacaoSolicitada
-            ? `O servidor já registra ${NOMES[atualPersistido.situacao]} para a quadra ${pendente.quadraCodigo} (versão ${atualPersistido.versao}). O registro local antigo foi reconciliado.`
-            : `A operação local da quadra ${pendente.quadraCodigo} ficou desatualizada. O servidor mantém ${NOMES[atualPersistido.situacao]} (versão ${atualPersistido.versao}); tente novamente para aplicar outra situação.`,
-          atualPersistido.situacao === pendente.situacaoSolicitada ? 'success' : 'error',
-        )
+        // A mudança de cor e situação no mapa já fornece o feedback visual.
+        // Não exiba uma mensagem de sucesso redundante após reconciliar o registro local.
+        setStatusFeedback('')
+        setStatusFeedbackQuadraId(null)
         return
       }
 
@@ -1016,15 +1014,18 @@ function MapPage() {
           )
           return
         }
-        definirFeedback(
-          pendente.quadraId,
-          gravacaoAtual.rpcError
-            ? `A operação da quadra ${pendente.quadraCodigo} retornou erro. Estado persistido atual: ${NOMES[atualPersistido.situacao]}.`
-            : atualPersistido.situacao === pendente.situacaoSolicitada
-              ? `Situação ${NOMES[atualPersistido.situacao]} da quadra ${pendente.quadraCodigo} confirmada no servidor.`
+        if (gravacaoAtual.rpcError || atualPersistido.situacao !== pendente.situacaoSolicitada) {
+          definirFeedback(
+            pendente.quadraId,
+            gravacaoAtual.rpcError
+              ? `A operação da quadra ${pendente.quadraCodigo} retornou erro. Estado persistido atual: ${NOMES[atualPersistido.situacao]}.`
               : `O servidor confirmou outro estado para a quadra ${pendente.quadraCodigo}: ${NOMES[atualPersistido.situacao]}.`,
-          !gravacaoAtual.rpcError && atualPersistido.situacao === pendente.situacaoSolicitada ? 'success' : 'error',
-        )
+            'error',
+          )
+        } else {
+          setStatusFeedback('')
+          setStatusFeedbackQuadraId(null)
+        }
         return
       }
 
