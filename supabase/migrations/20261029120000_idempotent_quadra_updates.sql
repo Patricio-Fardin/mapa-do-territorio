@@ -84,7 +84,7 @@ create or replace function public.aplicar_situacao_quadra_idempotente(
   p_operacao_id uuid,
   p_quadra_id uuid,
   p_situacao public.situacao_quadra,
-  p_observacao text default null,
+  p_observacao text,
   p_versao_esperada integer
 )
 returns jsonb
