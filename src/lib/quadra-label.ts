@@ -167,6 +167,13 @@ function larguraTexto(texto: string, fonte: number): number {
   return contexto.measureText(texto).width
 }
 
+function formatarDataAtualizacao(valor: string | null | undefined): string | null {
+  if (!valor) return null
+  const data = new Date(valor)
+  if (Number.isNaN(data.getTime())) return null
+  return new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(data)
+}
+
 export function criarIdentificacaoQuadra(
   mapa: L.Map,
   geometria: Geometry,
@@ -174,6 +181,7 @@ export function criarIdentificacaoQuadra(
   situacao: SituacaoQuadra,
   cor: string,
   mostrarCodigo = true,
+  dataAtualizacao?: string | null,
 ): L.Marker | null {
   const poligonos = extrairPoligonos(geometria)
   const poligono = poligonos.reduce<Poligono | null>((maior, atual) => (
@@ -208,10 +216,12 @@ export function criarIdentificacaoQuadra(
     }
   }
 
-  const largura = Math.max(1, Math.min(mostrarCodigo ? 150 : 120, raio * (mostrarCodigo ? 1.35 : 1.6), (maxX - minX) * (mostrarCodigo ? .85 : .8)))
-  const altura = Math.max(1, Math.min(mostrarCodigo ? 46 : 30, raio * (mostrarCodigo ? 1.35 : 1.2), (maxY - minY) * (mostrarCodigo ? .85 : .8)))
-  const compacto = largura < 48 || altura < 26
-  let fonte = Math.max(mostrarCodigo ? 1 : 6, Math.min(11, largura / (mostrarCodigo ? 8 : 7), altura / (compacto ? 1.5 : 2.8)))
+  const dataFormatada = situacao === 'concluida' ? formatarDataAtualizacao(dataAtualizacao) : null
+  const temData = mostrarCodigo && dataFormatada !== null
+  const largura = Math.max(1, Math.min(mostrarCodigo ? (temData ? 170 : 150) : 120, raio * (mostrarCodigo ? (temData ? 1.65 : 1.35) : 1.6), (maxX - minX) * (mostrarCodigo ? .9 : .8)))
+  const altura = Math.max(1, Math.min(mostrarCodigo ? (temData ? 60 : 46) : 30, raio * (mostrarCodigo ? (temData ? 1.65 : 1.35) : 1.2), (maxY - minY) * (mostrarCodigo ? .9 : .8)))
+  const compacto = largura < 48 || altura < (temData ? 38 : 26)
+  let fonte = Math.max(mostrarCodigo ? 1 : 6, Math.min(11, largura / (mostrarCodigo ? 8 : 7), altura / (temData ? 3.6 : compacto ? 1.5 : 2.8)))
   const statusPublico = STATUS_PUBLICOS[situacao]
   const paddingTexto = 4
   const larguraDisponivel = largura - paddingTexto
@@ -239,6 +249,7 @@ export function criarIdentificacaoQuadra(
   conteudo.className = [
     'quadra-label',
     mostrarCodigo && compacto ? 'quadra-label--compact' : '',
+    temData ? 'quadra-label--com-data' : '',
     mostrarCodigo ? '' : 'quadra-label--status-only',
   ].filter(Boolean).join(' ')
   conteudo.style.setProperty('--quadra-label-cor', cor)
@@ -261,6 +272,12 @@ export function criarIdentificacaoQuadra(
     conteudo.append(codigoElement)
   }
   conteudo.append(situacaoElement)
+  if (temData && dataFormatada) {
+    const dataElement = document.createElement('span')
+    dataElement.className = 'quadra-label__data'
+    dataElement.textContent = dataFormatada
+    conteudo.append(dataElement)
+  }
 
   if (!mapa.getPane('quadraLabels')) {
     const pane = mapa.createPane('quadraLabels')

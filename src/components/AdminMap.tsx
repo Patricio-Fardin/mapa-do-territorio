@@ -11,7 +11,7 @@ import {
 import { criarIdentificacaoQuadra } from '../lib/quadra-label'
 
 type Situacao = SituacaoQuadra
-type Quadra = { id: string; codigo: string; situacao: Situacao; geometria: Geometry; ativa: boolean }
+type Quadra = { id: string; codigo: string; situacao: Situacao; updatedAt: string | null; geometria: Geometry; ativa: boolean }
 type GeometriaEditada = { id: string; geometria: Geometry }
 type RpcQuadra = { id?: string; codigo?: string; geometria?: Geometry }
 type Props = { adminEmail: string; onUnauthorized: () => void }
@@ -31,6 +31,10 @@ function normalizarQuadras(rows: Array<{ id: string; codigo: string; geometria: 
     geometria: row.geometria,
     ativa: row.ativa,
     situacao: normalizarSituacaoQuadra(row.situacoes_quadras),
+    updatedAt: (() => {
+      const relacao = Array.isArray(row.situacoes_quadras) ? row.situacoes_quadras[0] : row.situacoes_quadras
+      return relacao && typeof relacao === 'object' && 'updated_at' in relacao && typeof relacao.updated_at === 'string' ? relacao.updated_at : null
+    })(),
   }))
 }
 
@@ -47,7 +51,7 @@ async function lerQuadrasPorAtividade(ativa: boolean): Promise<Quadra[]> {
   for (let offset = 0; ; offset += pageSize) {
     const { data, error } = await supabase
       .from('quadras')
-      .select('id,codigo,geometria,ativa,situacoes_quadras(situacao)')
+      .select('id,codigo,geometria,ativa,situacoes_quadras(situacao,updated_at)')
       .eq('ativa', ativa)
       .order('id')
       .range(offset, offset + pageSize - 1)
@@ -173,7 +177,7 @@ function AdminDrawingMap({
       if (!labelLayers) return
       labelLayers.clearLayers()
       items.forEach((quadra) => {
-        const label = criarIdentificacaoQuadra(map, quadra.geometria, quadra.codigo, quadra.situacao, CORES[quadra.situacao])
+        const label = criarIdentificacaoQuadra(map, quadra.geometria, quadra.codigo, quadra.situacao, CORES[quadra.situacao], true, quadra.situacao === 'concluida' ? quadra.updatedAt : null)
         if (label) labelLayers.addLayer(label)
       })
     }
@@ -477,6 +481,7 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
           codigo,
           geometria: created.geometria ?? geometria,
           situacao: 'pendente',
+          updatedAt: null,
           ativa: true,
         }])
         setSelectedId(created.id)

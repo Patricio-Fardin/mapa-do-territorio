@@ -15,7 +15,7 @@ import 'leaflet-draw'
 import './App.css'
 
 type Situacao = SituacaoQuadra
-type Quadra = { id: string; codigo: string; situacao: Situacao; versao: number; geometria?: GeoJSON.Geometry }
+type Quadra = { id: string; codigo: string; situacao: Situacao; versao: number; updatedAt: string | null; geometria?: GeoJSON.Geometry }
 const CORES: Record<Situacao, string> = { pendente: '#78858a', concluida: '#27ae60', refazer: '#e67e22' }
 const NOMES: Record<Situacao, string> = { pendente: 'Pendente', concluida: 'Concluída', refazer: 'Refazer' }
 const centro: [number, number] = [-20.6353, -40.7498]
@@ -176,7 +176,7 @@ async function lerQuadrasPublicas(client: NonNullable<typeof supabase>): Promise
   for (let offset = 0; ; offset += pageSize) {
     const { data, error, status } = await client
       .from('quadras')
-      .select('id,codigo,geometria,ativa,situacoes_quadras(situacao,versao)')
+      .select('id,codigo,geometria,ativa,situacoes_quadras(situacao,versao,updated_at)')
       .eq('ativa', true)
       .order('id')
       .range(offset, offset + pageSize - 1)
@@ -189,6 +189,10 @@ async function lerQuadrasPublicas(client: NonNullable<typeof supabase>): Promise
       versao: (() => {
         const relacao = Array.isArray(row.situacoes_quadras) ? row.situacoes_quadras[0] : row.situacoes_quadras
         return relacao && typeof relacao === 'object' && 'versao' in relacao && typeof relacao.versao === 'number' ? relacao.versao : 0
+      })(),
+      updatedAt: (() => {
+        const relacao = Array.isArray(row.situacoes_quadras) ? row.situacoes_quadras[0] : row.situacoes_quadras
+        return relacao && typeof relacao === 'object' && 'updated_at' in relacao && typeof relacao.updated_at === 'string' ? relacao.updated_at : null
       })(),
     })))
     if ((data?.length ?? 0) < pageSize) return quadras
@@ -233,6 +237,7 @@ type RespostaRpc = {
   status: 'updated' | 'unchanged' | 'replayed' | 'conflict' | 'rejected'
   situacao?: Situacao
   versao?: number
+  updatedAt?: string
 }
 
 function respostaDaRpc(data: unknown, quadraId: string): RespostaRpc {
@@ -248,8 +253,9 @@ function respostaDaRpc(data: unknown, quadraId: string): RespostaRpc {
   if (status === 'rejected') return { quadraId, status: 'rejected' }
   if (!('situacao' in data)) throw new FormatoSituacaoQuadraInvalido()
   const versao = 'versao' in data && typeof data.versao === 'number' && Number.isInteger(data.versao) ? data.versao : undefined
+  const updatedAt = 'updated_at' in data && typeof data.updated_at === 'string' ? data.updated_at : undefined
   if (temStatus && versao === undefined) throw new FormatoSituacaoQuadraInvalido()
-  return { quadraId, status: status as Exclude<RespostaRpc['status'], 'rejected'>, situacao: normalizarSituacaoQuadra(data.situacao), versao }
+  return { quadraId, status: status as Exclude<RespostaRpc['status'], 'rejected'>, situacao: normalizarSituacaoQuadra(data.situacao), versao, updatedAt }
 }
 
 function PersistedLayers({ quadras, onSelect, layers }: { quadras: Quadra[]; onSelect: (id: string) => void; layers: React.MutableRefObject<Map<string, L.Layer[]>> }) {
@@ -262,7 +268,7 @@ function PersistedLayers({ quadras, onSelect, layers }: { quadras: Quadra[]; onS
       labels.clearLayers()
       quadras.forEach((quadra) => {
         if (!quadra.geometria) return
-        const label = criarIdentificacaoQuadra(map, quadra.geometria, quadra.codigo, quadra.situacao, CORES[quadra.situacao], false)
+        const label = criarIdentificacaoQuadra(map, quadra.geometria, quadra.codigo, quadra.situacao, CORES[quadra.situacao], true, quadra.situacao === 'concluida' ? quadra.updatedAt : null)
         if (label) labels.addLayer(label)
       })
     }
@@ -1380,7 +1386,7 @@ function MapPage() {
             const situacaoAtual: Situacao = respostaConfirmada.situacao
             const versaoAtual: number = respostaConfirmada.versao
             setQuadras((items) => items.map((quadra) => quadra.id === quadraId
-              ? { ...quadra, situacao: situacaoAtual, versao: versaoAtual }
+              ? { ...quadra, situacao: situacaoAtual, versao: versaoAtual, updatedAt: respostaConfirmada.updatedAt ?? quadra.updatedAt }
               : quadra))
           }
           // Conflict/rejected é resultado terminal conhecido: a operação antiga
@@ -1402,7 +1408,7 @@ function MapPage() {
         const situacaoAtual: Situacao = respostaConfirmada.situacao
         const versaoAtual = respostaConfirmada.versao
         setQuadras((items) => items.map((quadra) => quadra.id === quadraId
-          ? { ...quadra, situacao: situacaoAtual, versao: versaoAtual ?? quadra.versao + 1 }
+          ? { ...quadra, situacao: situacaoAtual, versao: versaoAtual ?? quadra.versao + 1, updatedAt: respostaConfirmada.updatedAt ?? new Date().toISOString() }
           : quadra))
         definirFeedback(quadraId, `Situação da quadra ${quadraCodigo} salva.`, 'success')
         void carregarQuadras(true)
@@ -1520,7 +1526,7 @@ function MapPage() {
       : storageStatus === 'corrupt'
         ? 'Há um registro local de operação incerta inválido ou antigo. Ele foi preservado para diagnóstico; novas alterações continuam permitidas, com confirmação dependente da resposta do servidor.'
     : pendingSave
-      ? 'Uma alteração ainda não foi confirmada. Consulte o estado no servidor antes de tentar outra alteração.'
+      ? `A alteração da quadra ${pendingSave.quadraCodigo} ainda não foi confirmada. Consulte o estado no servidor antes de repetir a alteração dessa quadra.`
     : !quadrasCarregadas && connectionStatus === 'loading'
       ? 'Carregando quadras…'
       : !quadrasCarregadas
@@ -1600,7 +1606,7 @@ function MapPage() {
           </button>
         </> : pendingSave ? <>
           <p className="status-feedback status-feedback--warning" role="status">
-            A gravação da quadra {pendingSave.quadraCodigo} continua não confirmada. Novas alterações estão bloqueadas até a reconciliação.
+            A gravação da quadra {pendingSave.quadraCodigo} continua não confirmada. Esta pendência se refere somente a essa quadra; consulte o estado antes de repetir a alteração nela.
           </p>
           <button type="button" className="reconcile-save-button" onClick={() => void consultarGravacaoIncerta()} disabled={reconcilingPendingSave} aria-label={`Consultar novamente o estado não confirmado da quadra ${pendingSave.quadraCodigo}`}>
             {reconcilingPendingSave ? 'Consultando situação…' : `Consultar quadra ${pendingSave.quadraCodigo}`}
