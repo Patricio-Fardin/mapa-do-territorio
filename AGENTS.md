@@ -69,10 +69,11 @@ Execute `npm.cmd run dev` ou `npm.cmd run preview` quando a validação visual l
 - O painel é responsivo no mobile e desktop. A linha de status permanece em uma linha; erro fica vermelho e o detalhe é exposto pelo atributo `title`, com foco de teclado disponível.
 - Validações recentes registraram build e lint aprovados e uma simulação de layout em larguras desktop estreita e ampla, com altura da linha e posição dos botões estáveis. Isso não substitui testes automatizados de regressão.
 - Seletor administrativo OSM/CARTO Positron implementado: preferência local em `localStorage`, camada `MapContainer` preservada, atribuição visível e nenhuma chamada de escrita ao Supabase por mudança de estilo. Endpoint testado e retornou HTTP 200 `image/png` no ambiente atual; o teste não substitui smoke test visual.
+- Botão público “Centralizar no meu local” com ícone Lucide `LocateFixed`, rótulos acessíveis e `map.locate({ setView: true, maxZoom: 16 })`; em falha, comunica o erro e restaura o enquadramento anterior. “Restaurar visão do mapa” mantém sua função com ícone `Scan`.
 
 ### Próximas etapas de interface ainda pendentes
 
-1. Agrupar localização do usuário e zoom `+`/`−` no canto inferior direito; geolocalização deve pedir permissão e tratar recusas/falhas.
+1. Agrupar localização e zoom `+`/`−` no canto inferior direito; o botão de localização já existe no canto superior direito, mas sua posição e os controles de zoom ainda precisam ser reorganizados.
 2. Remover o botão de tema isolado do mapa público (se presente na versão alvo) e transferir a preferência para a área administrativa; decidir se a preferência é local ou compartilhada.
 3. Ocultar textos dos rótulos abaixo do zoom 15 e mostrá-los no zoom 15 ou superior, atualizando a sincronização inicial e em `zoomend` nos mapas público e administrativo. Polígonos continuam clicáveis.
 

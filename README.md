@@ -42,6 +42,7 @@ Versões declaradas vêm de `package.json`; versões efetivamente instaladas for
 | Supabase JS | `^2.118.0` | `2.118.0` | Auth, PostgREST RPC/consultas e Realtime; `src/lib/supabase.ts` |
 | Leaflet | `^1.9.4` | `1.9.4` | Renderização e interação do mapa; `src/App.tsx`, `src/components/AdminMap.tsx` |
 | React-Leaflet | `^5.0.0` | `5.0.0` | Componentes React do mapa; `src/App.tsx`, `src/components/AdminMap.tsx` |
+| Lucide React | `lucide-react` (versão no lockfile) | Consulte `npm.cmd ls lucide-react` | Ícones vetoriais SVG dos controles do mapa; `src/App.tsx` |
 | Leaflet Draw | `^1.0.4` | `1.0.4` | Desenho e edição administrativa; `src/components/AdminMap.tsx` |
 | Oxlint | `^1.88.0` | `1.89.0` | Análise estática; `npm run lint`, `.oxlintrc.json` |
 | Supabase CLI | `^2.121.0` | `2.121.0` | Dependência de desenvolvimento para tarefas locais/CLI; `package.json` |
@@ -57,7 +58,7 @@ Versões declaradas vêm de `package.json`; versões efetivamente instaladas for
 | CARTO Basemaps | Serviço externo, sem versão npm | Não aplicável | Tiles Positron raster (`light_all`) exclusivo da área administrativa; exige chave pública `VITE_CARTO_BASEMAP_KEY` e atribuição OSM/CARTO |
 | Web Locks, `localStorage`, evento `storage` | APIs do navegador | Depende do navegador | Coordenação/persistência em `src/App.tsx`; sem `BroadcastChannel` |
 
-Não há ESLint, biblioteca de ícones, framework de formulários ou suíte geral de testes unitários/e2e declarados no manifesto. Existe, porém, o script específico `npm.cmd run test:idempotent-migration`, que verifica invariantes da migration de atualização idempotente; ele não substitui testes de interface, integração real ou concorrência. Os símbolos usados nos rótulos são texto/Unicode e o controle de restauração tem SVG inline.
+Não há ESLint, framework de formulários ou suíte geral de testes unitários/e2e declarados no manifesto. O projeto usa `lucide-react` para ícones vetoriais SVG nos controles de navegação. Existe o script específico `npm.cmd run test:idempotent-migration`, que verifica invariantes da migration de atualização idempotente; ele não substitui testes de interface, integração real ou concorrência. Os símbolos usados nos rótulos são texto/Unicode.
 
 ## Arquitetura e arquivos
 
@@ -122,7 +123,7 @@ Não há ESLint, biblioteca de ícones, framework de formulários ou suíte gera
 - A tela pública usa o mapa como plano principal em `100dvh`, com fallback `100vh`, cabeçalho translúcido e indicadores flutuantes; chips podem rolar horizontalmente em telas estreitas. O enquadramento inicial compensa a área dos elementos sobrepostos.
 - O painel de seleção fica sobre o mapa e é responsivo: mobile usa margens seguras e altura máxima compacta; desktop adapta largura a partir de 641 px e pode ampliar até 440 px a partir de 1200 px.
 - A linha “Situação atual” é a única área de feedback do salvamento normal: “Aguardando…”/“Salvando…”, status final ou “Erro ao salvar”. Não existe uma linha reservada de altura fixa abaixo dos botões. O estado de erro torna o motivo disponível pelo tooltip nativo `title` e por foco de teclado; o prefixo mantém cor neutra e o texto de erro fica vermelho.
-- O controle para restaurar a visualização fica no canto superior direito do mapa. O mapa público continua usando OpenStreetMap sem seletor de fundo; o seletor OSM/CARTO está limitado à área administrativa. Localização do usuário, agrupamento de zoom/localização e controle de tema ainda não foram implementados. `prefers-reduced-motion` deve ser respeitado em futuras animações.
+- No canto superior direito do mapa público há o botão “Centralizar no meu local”, com ícone Lucide `LocateFixed` e geolocalização nativa do Leaflet (`map.locate({ setView: true, maxZoom: 16 })`), e o botão “Restaurar visão do mapa”, agora com ícone `Scan`. Se a localização falhar, o mapa mantém o enquadramento anterior e exibe uma mensagem acessível. O mapa público continua usando OpenStreetMap sem seletor de fundo; o seletor OSM/CARTO está limitado à área administrativa. Agrupamento de zoom/localização no canto inferior direito e controle de tema ainda estão pendentes. `prefers-reduced-motion` deve ser respeitado em futuras animações.
 - Estados de inicialização, dados desatualizados, falha/indisponibilidade de conexão, armazenamento indisponível/corrompido e operação pendente são comunicados. Sem Supabase configurado, operações e autorização não são simuladas com dados locais.
 
 ## Área administrativa e autenticação
@@ -264,10 +265,11 @@ O script `admin:set-password` (`npm.cmd run admin:set-password -- <UUID>`) está
 - **Etapa 1 — Mapa como elemento principal:** mapa público em tela cheia; cabeçalho translúcido flutuante; contadores em chips compactos; enquadramento inicial ajustado para a área dos overlays. Commit de referência: `57b329a`.
 - **Feedback sem Layout Shift:** substituição do status na própria linha “Situação atual” durante salvamento, sucesso e erro; removida a área fixa de feedback que desperdiçava espaço vertical. Commit de referência: `b672179`.
 - **Alternância de mapa-base administrativo:** seletor entre OpenStreetMap e CARTO Positron (`light_all`), preferência local em `localStorage`, atribuição visível a OSM/CARTO e nenhuma escrita no Supabase. O componente `MapContainer` não é recriado; a seleção/estado das quadras permanece no componente administrativo.
+- **Geolocalização no mapa público:** ícone Lucide `LocateFixed` e ação `map.locate({ setView: true, maxZoom: 16 })`; mensagens acessíveis para falhas e restauração do enquadramento anterior se o navegador não conseguir localizar. A função “Restaurar visão do mapa” foi mantida com o ícone Lucide `Scan`.
 
 ### Próximas etapas de interface — pendentes
 
-1. **Controles do mapa:** agrupar “Minha localização” e zoom `+ / −` no canto inferior direito, com alvos acessíveis e espaçamento seguro para o painel de quadra e as margens do dispositivo. Usar a API de geolocalização do navegador com permissão e falha tratada sem bloquear o mapa.
+1. **Controles do mapa (parcialmente concluído):** o botão “Centralizar no meu local” já usa `map.locate`, solicita permissão do navegador e trata erros sem perder o enquadramento anterior. Falta organizar a geolocalização e os controles de zoom `+ / −` em um grupo no canto inferior direito, com alvos acessíveis e espaçamento seguro para painel de quadra e margens do dispositivo.
 2. **Tema na área administrativa:** adicionar a preferência de tema na área administrativa, sem criar um botão isolado no mapa público. Não foi encontrado um controle de tema na inspeção do código atual; confirmar a experiência desejada antes de implementá-la. Definir se o tema é local por navegador ou compartilhado antes de decidir onde persistir.
 3. **Rótulos conforme zoom:** ocultar os textos dos rótulos quando o zoom for menor que 15 e mostrá-los a partir de 15, sincronizando renderização inicial e evento `zoomend` nos mapas público e administrativo. Manter polígonos visíveis, selecionáveis e clicáveis; a mudança afeta somente os rótulos.
 

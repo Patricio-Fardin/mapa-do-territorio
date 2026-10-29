@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { LocateFixed, Scan } from 'lucide-react'
 import { AttributionControl, MapContainer, TileLayer, useMap } from 'react-leaflet'
 import L, { type Layer } from 'leaflet'
 import AdminMap from './components/AdminMap'
@@ -296,14 +297,28 @@ function PersistedLayers({ quadras, onSelect, layers }: { quadras: Quadra[]; onS
   return null
 }
 
-function MapReference({ mapRef }: { mapRef: React.MutableRefObject<L.Map | null> }) {
+function MapReference({
+  mapRef,
+  onLocationFound,
+  onLocationError,
+}: {
+  mapRef: React.MutableRefObject<L.Map | null>
+  onLocationFound: () => void
+  onLocationError: (code: number) => void
+}) {
   const map = useMap()
   useEffect(() => {
     mapRef.current = map
+    const locationFound = () => onLocationFound()
+    const locationError = (event: L.ErrorEvent) => onLocationError(event.code)
+    map.on('locationfound', locationFound)
+    map.on('locationerror', locationError)
     return () => {
+      map.off('locationfound', locationFound)
+      map.off('locationerror', locationError)
       mapRef.current = null
     }
-  }, [map, mapRef])
+  }, [map, mapRef, onLocationFound, onLocationError])
   return null
 }
 
@@ -797,6 +812,9 @@ function MapPage() {
   const lastSuccessfulLoadAtRef = useRef<number | null>(null)
   const layers = useRef(new Map<string, L.Layer[]>())
   const mapRef = useRef<L.Map | null>(null)
+  const previousLocationView = useRef<{ center: L.LatLng; zoom: number } | null>(null)
+  const [locating, setLocating] = useState(false)
+  const [locationMessage, setLocationMessage] = useState('')
   const initialViewRestored = useRef(false)
   const selectedRef = useRef<string | null>(null)
 
@@ -1265,6 +1283,37 @@ function MapPage() {
     }
   }
 
+  const tratarLocalizacaoEncontrada = useCallback(() => {
+    previousLocationView.current = null
+    setLocating(false)
+    setLocationMessage('')
+  }, [])
+
+  const tratarErroLocalizacao = useCallback((code: number) => {
+    const previousView = previousLocationView.current
+    if (previousView) mapRef.current?.setView(previousView.center, previousView.zoom, { animate: false })
+    previousLocationView.current = null
+    setLocating(false)
+    setLocationMessage(code === 1
+      ? 'Permita o acesso à localização no navegador para centralizar o mapa.'
+      : code === 3
+        ? 'A localização demorou para responder. Tente novamente.'
+        : 'Não foi possível determinar sua localização. Verifique as permissões e tente novamente.')
+  }, [])
+
+  const centralizarNoMeuLocal = useCallback(() => {
+    const map = mapRef.current
+    if (!map || locating) return
+    previousLocationView.current = { center: map.getCenter(), zoom: map.getZoom() }
+    setLocating(true)
+    setLocationMessage('Obtendo sua localização…')
+    try {
+      map.locate({ setView: true, maxZoom: 16 })
+    } catch {
+      tratarErroLocalizacao(0)
+    }
+  }, [locating, tratarErroLocalizacao])
+
   useEffect(() => {
     if (!quadrasCarregadas || initialViewRestored.current || !mapRef.current) return
     const bounds = calcularLimitesQuadras(quadras)
@@ -1555,17 +1604,32 @@ function MapPage() {
       </section>}
       <section className="map-card public-map-card">
         <MapContainer center={centro} zoom={14} zoomControl={false} touchZoom dragging attributionControl={false} className="map public-map">
-          <MapReference mapRef={mapRef} />
+          <MapReference
+            mapRef={mapRef}
+            onLocationFound={tratarLocalizacaoEncontrada}
+            onLocationError={tratarErroLocalizacao}
+          />
           <AttributionControl position="bottomleft" />
           <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
           <PersistedLayers quadras={quadras} onSelect={select} layers={layers} />
         </MapContainer>
-        <button type="button" className="restore-map-view" onClick={restaurarVisaoMapa} aria-label="Restaurar visão do mapa" title="Restaurar visão do mapa">
-          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <path d="M12 3v4m0 10v4M3 12h4m10 0h4M8 8l-3.5-3.5M16 8l3.5-3.5M8 16l-3.5 3.5M16 16l3.5 3.5" />
-            <circle cx="12" cy="12" r="4" />
-          </svg>
-        </button>
+        <div className="map-navigation-controls" role="group" aria-label="Controles do mapa">
+          <button
+            type="button"
+            className="map-navigation-button map-location-button"
+            onClick={centralizarNoMeuLocal}
+            disabled={locating}
+            aria-label="Centralizar no meu local"
+            title="Centralizar no meu local"
+            aria-busy={locating}
+          >
+            <LocateFixed size={24} strokeWidth={1.8} aria-hidden="true" focusable="false" />
+          </button>
+          <button type="button" className="map-navigation-button restore-map-view" onClick={restaurarVisaoMapa} aria-label="Restaurar visão do mapa" title="Restaurar visão do mapa">
+            <Scan size={24} strokeWidth={1.8} aria-hidden="true" focusable="false" />
+          </button>
+        </div>
+        {locationMessage && <p className="map-location-feedback" role="status" aria-live="polite">{locationMessage}</p>}
       </section>
       <section className="status-panel public-status-panel" aria-label="Indicadores das quadras">
         <div><strong>{counts.total}</strong><span>Total</span></div>

@@ -36,6 +36,7 @@ Use sempre `package.json`, `package-lock.json`, configurações e migrations atu
 7. Leitura paginada, atualização Realtime quando disponível e atualização periódica.
 8. Mecanismo cliente para coordenar e diagnosticar atualizações de situação incertas e migration local de atualização idempotente/versionada. Consulte o código e a migration antes de alterar esse fluxo.
 9. Seletor de mapa-base na área administrativa entre OSM e CARTO Positron (`light_all`), persistido em `localStorage`, sem recriar o `MapContainer` nem efetuar escritas no Supabase. Manter atribuição dos provedores e chave CARTO via `VITE_CARTO_BASEMAP_KEY`.
+10. Controle público “Centralizar no meu local” com ícone Lucide `LocateFixed`; usa `map.locate({ setView: true, maxZoom: 16 })`, respeita permissão do navegador e restaura o enquadramento anterior se a localização falhar. O controle “Restaurar visão do mapa” continua disponível com ícone Lucide `Scan`.
 
 ## Requisitos visuais e responsividade
 
@@ -80,7 +81,7 @@ Use sempre `package.json`, `package-lock.json`, configurações e migrations atu
 
 ## Próximas etapas de interface já identificadas
 
-- **Controles:** agrupar “Minha localização” e zoom `+`/`−` no canto inferior direito; tratar permissão/erro de geolocalização.
+- **Controles:** o botão de geolocalização `LocateFixed` e a restauração `Scan` estão implementados no topo à direita; falta agrupar localização e zoom `+`/`−` no canto inferior direito.
 - **Tema:** mover a preferência de tema para a área administrativa e remover botão isolado do mapa público, se presente na versão alvo. Definir antes se a preferência é local ou compartilhada.
 - **Rótulos por zoom:** ocultar textos dos rótulos quando zoom < 15 e exibi-los no zoom >= 15, tanto no mapa público quanto no administrativo, sem esconder ou desabilitar os polígonos.
 - **Testes:** adicionar testes/mocks para respostas atrasadas/fora de ordem, conflitos, timeout, armazenamento indisponível/corrompido, recarga e coordenação entre abas.

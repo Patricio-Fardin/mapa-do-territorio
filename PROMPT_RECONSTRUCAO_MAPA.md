@@ -303,10 +303,11 @@ Não substitua nenhuma dessas lacunas por credenciais fictícias apresentadas co
 - Feedback de situação em linha, sem área de altura fixa abaixo dos botões: “Salvando…”/estado final/“Erro ao salvar” (`b672179`).
 - Ajuste do painel para desktop, status de uma linha, tooltip `title`, cor de erro e foco de teclado (`95b6993`). A simulação visual local observou a linha com altura constante e posição dos botões estável em janelas desktop estreita e ampla; isso não é substituto para uma suíte automatizada.
 - Seletor administrativo OSM/CARTO Positron (`light_all`) com `localStorage`, atribuição de ambos os provedores e atualização da URL da camada sem recriar o `MapContainer`; build, lint, validação estática existente e verificação HTTP do endpoint aprovados.
+- Controles públicos de navegação: ícone Lucide `LocateFixed` chama `map.locate({ setView: true, maxZoom: 16 })`, mostra mensagens acessíveis de erro e preserva o enquadramento anterior em caso de falha; ícone `Scan` restaura a visão das quadras.
 
 ### Pendências de interface
 
-1. **Controles:** agrupar geolocalização e zoom `+`/`−` no canto inferior direito, respeitando permissão de geolocalização, safe areas e painel de seleção.
+1. **Controles (parcialmente concluído):** o botão de geolocalização está no topo à direita e trata permissões/falhas; falta mover/organizar geolocalização e zoom `+`/`−` no canto inferior direito, respeitando safe areas e painel de seleção.
 2. **Tema:** mover a escolha de tema para a área administrativa e remover o controle de tema isolado da interface pública se ainda estiver presente na versão alvo. Definir persistência local ou compartilhada antes de escolher armazenamento.
 3. **Rótulos por zoom:** ocultar o texto do rótulo em zoom menor que 15 e exibi-lo em zoom 15 ou superior, tanto no mapa público quanto no administrativo; não ocultar ou desativar os polígonos.
 
