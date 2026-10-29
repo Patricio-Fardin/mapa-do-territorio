@@ -1259,7 +1259,7 @@ function MapPage() {
     if (!map) return
     const bounds = calcularLimitesQuadras(quadras)
     if (bounds) {
-      map.fitBounds(bounds.pad(.1), { maxZoom: 15 })
+      map.fitBounds(bounds, { maxZoom: 17, paddingTopLeft: [20, 116], paddingBottomRight: [20, 24] })
     } else {
       map.setView(centro, 14)
     }
@@ -1269,7 +1269,7 @@ function MapPage() {
     if (!quadrasCarregadas || initialViewRestored.current || !mapRef.current) return
     const bounds = calcularLimitesQuadras(quadras)
     if (!bounds) return
-    mapRef.current.fitBounds(bounds.pad(.1), { maxZoom: 15 })
+    mapRef.current.fitBounds(bounds, { maxZoom: 17, paddingTopLeft: [20, 116], paddingBottomRight: [20, 24] })
     initialViewRestored.current = true
   }, [quadras, quadrasCarregadas])
 
