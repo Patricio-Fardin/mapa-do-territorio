@@ -1169,14 +1169,10 @@ function MapPage() {
   }, [])
   const atual = quadras.find((quadra) => quadra.id === selected)
   const dadosRecentes = lastSuccessfulLoadAt !== null && clock - lastSuccessfulLoadAt <= DADOS_DESATUALIZADOS_MS
-  const podeAlterar = Boolean(
-    client
-    && quadrasCarregadas
-    && connectionStatus === 'available'
-    && dadosRecentes
-    && !refreshing
-    && pendingSave?.quadraId !== atual?.id,
-  )
+  // A interface não deve manter os botões bloqueados por dados antigos,
+  // reconciliação local ou atualização em segundo plano. A RPC versionada
+  // continua sendo a autoridade para aceitar ou rejeitar a alteração.
+  const podeAlterar = Boolean(client && quadrasCarregadas)
   const counts = useMemo(() => ({
     total: quadras.length,
     pendente: quadras.filter((quadra) => quadra.situacao === 'pendente').length,
@@ -1204,7 +1200,7 @@ function MapPage() {
   }, [quadras, quadrasCarregadas])
 
   const alterar = async (situacao: Situacao) => {
-    if (!atual || !client || !podeAlterar || statusLocks.current.has(atual.id) || pendingSaveRef.current?.quadraId === atual.id) return
+    if (!atual || !client || !podeAlterar || statusLocks.current.has(atual.id)) return
     const quadraId = atual.id
     const quadraCodigo = atual.codigo
     const operationToken = (operacaoSequencia.current.get(quadraId) ?? 0) + 1
@@ -1225,11 +1221,11 @@ function MapPage() {
       }
       persistedRecordRef.current = persisted.record
       if (persisted.gravacao?.quadraId === quadraId) {
+        // Não transforme um registro local incerto em bloqueio permanente.
+        // A nova tentativa usa a versão esperada do cliente e a RPC rejeita
+        // conflitos sem sobrescrever silenciosamente uma alteração concorrente.
         pendingSaveRef.current = persisted.gravacao
         setPendingSave(persisted.gravacao)
-        setSavingStatus(false)
-        await reconciliarGravacaoIncerta(true)
-        return
       }
       if (persisted.gravacao && persisted.gravacao.quadraId !== quadraId) {
         persistenciaLocalAtiva = false
