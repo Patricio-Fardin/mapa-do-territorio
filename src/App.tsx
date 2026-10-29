@@ -1595,22 +1595,31 @@ function MapPage() {
             </button>
           ))}
         </div>
-        {pendingSave?.quadraId === atual.id ? <>
+        {pendingSave?.quadraId === atual.id && <>
           <p className="status-feedback status-feedback--warning" role="status">
             {pendingSave.message}
           </p>
           <button type="button" className="reconcile-save-button" onClick={() => void consultarGravacaoIncerta()} disabled={reconcilingPendingSave} aria-label={`Consultar novamente o estado não confirmado da quadra ${pendingSave.quadraCodigo}`}>
             {reconcilingPendingSave ? 'Consultando situação…' : 'Consultar situação novamente'}
           </button>
-        </> : !podeAlterar && !savingStatus && <p className="status-feedback status-feedback--warning" role="status">
-          {!client
-            ? 'O servidor não está configurado; as situações não podem ser salvas.'
-            : connectionStatus === 'loading' || refreshing
-              ? 'Aguardando a confirmação dos dados do servidor…'
-              : 'Não é possível alterar situações até que os dados atuais sejam confirmados pelo servidor.'}
-        </p>}
-        {savingStatus && <p className="status-feedback status-feedback--busy" role="status"><span className="status-spinner" aria-hidden="true" />{waitingForCoordination ? 'Aguardando coordenação segura entre abas…' : 'Salvando situação…'}</p>}
-        {!pendingSave && !savingStatus && statusFeedback && statusFeedbackQuadraId === atual.id && <p className={`status-feedback status-feedback--${statusFeedbackKind}`} role={statusFeedbackKind === 'error' ? 'alert' : 'status'}>{statusFeedback}</p>}
+        </>}
+        <div className="status-feedback-slot">
+          {!podeAlterar && !savingStatus && !pendingSave ? (
+            <p className="status-feedback status-feedback--warning" role="status">
+              {!client
+                ? 'O servidor não está configurado; as situações não podem ser salvas.'
+                : connectionStatus === 'loading' || refreshing
+                  ? 'Aguardando a confirmação dos dados do servidor…'
+                  : 'Não é possível alterar situações até que os dados atuais sejam confirmados pelo servidor.'}
+            </p>
+          ) : savingStatus ? (
+            <p className="status-feedback status-feedback--busy" role="status"><span className="status-spinner" aria-hidden="true" />{waitingForCoordination ? 'Aguardando coordenação segura entre abas…' : 'Salvando situação…'}</p>
+          ) : !pendingSave && statusFeedback && statusFeedbackQuadraId === atual.id ? (
+            <p className={`status-feedback status-feedback--${statusFeedbackKind}`} role={statusFeedbackKind === 'error' ? 'alert' : 'status'}>{statusFeedback}</p>
+          ) : (
+            <p className="status-feedback status-feedback--empty" aria-hidden="true">&nbsp;</p>
+          )}
+        </div>
       </aside>}
     </main>
   )

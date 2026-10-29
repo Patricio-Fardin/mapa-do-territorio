@@ -86,7 +86,10 @@ button:hover { border-color: #287f73; }
 .status-button--pendente { background: #66747a; }
 .status-button--concluida { background: #168548; }
 .status-button--refazer { background: #b95700; }
+.status-feedback-slot { box-sizing: border-box; height: 3.4em; min-height: 3.4em; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
 .status-feedback { min-height: 1.2em; margin: 0; color: #287f73; font-size: .9rem; font-weight: 700; }
+.status-feedback-slot > .status-feedback { min-height: 100%; }
+.status-feedback--empty { visibility: hidden; }
 .status-feedback--error, .status-feedback--warning { color: #856404; }
 .status-feedback--busy { display: flex; align-items: center; gap: .5rem; }
 .reconcile-save-button { justify-self: start; min-height: 44px; border-color: #9c7b20; color: #695313; font-weight: 700; }
