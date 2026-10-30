@@ -15,7 +15,7 @@ button:hover { border-color: #287f73; }
 .quadra-label { box-sizing: border-box; display: flex; width: var(--quadra-label-largura); height: var(--quadra-label-altura); flex-direction: column; align-items: center; justify-content: center; overflow: hidden; border: 1px solid var(--quadra-label-cor); border-radius: .25rem; background: #ffffffdc; color: var(--quadra-label-cor); font-weight: 800; line-height: 1.05; pointer-events: none; text-align: center; text-shadow: 0 0 2px #fff; }
 .quadra-label__codigo { max-width: 100%; overflow: hidden; font-size: calc(var(--quadra-label-fonte) * .72); text-overflow: clip; white-space: nowrap; }
 .quadra-label__situacao { max-width: 100%; overflow-wrap: anywhere; font-size: var(--quadra-label-fonte); }
-.quadra-label__data { max-width: 100%; overflow: hidden; font-size: calc(var(--quadra-label-fonte) * .78); font-weight: 700; line-height: 1; white-space: nowrap; }
+.quadra-label__data { max-width: 100%; overflow: hidden; font-size: max(11px, calc(var(--quadra-label-fonte) * 1.05)); font-weight: 800; line-height: 1.1; white-space: nowrap; }
 .quadra-label--com-data .quadra-label__situacao { white-space: nowrap; }
 .quadra-label--status-only { flex-direction: row; gap: 2px; padding: 0 2px; border: 0; background: rgb(255 255 255 / 76%); color: #173d43; }
 .quadra-label--status-only .quadra-label__situacao { color: #173d43; font-weight: 900; }
