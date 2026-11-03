@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { MapContainer, TileLayer, ZoomControl, useMap } from 'react-leaflet'
+import { AttributionControl, MapContainer, TileLayer, ZoomControl, useMap } from 'react-leaflet'
+import { Wrench } from 'lucide-react'
 import L from 'leaflet'
 import type { Geometry, MultiPolygon, Polygon } from 'geojson'
 import { supabase } from '../lib/supabase'
@@ -677,7 +678,7 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
         aria-controls="admin-tools-panel"
         onClick={() => setToolsPanelOpen((open) => !open)}
       >
-        {toolsPanelOpen ? '×' : '⚙'}
+        {toolsPanelOpen ? '×' : <Wrench size={24} strokeWidth={1.9} aria-hidden="true" focusable="false" />}
       </button>
       {toolsPanelOpen && <div id="admin-tools-panel" className="admin-tools-panel" aria-label="Ferramentas administrativas">
         <div
@@ -694,11 +695,14 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
         {(loading || busy) && <p className="admin-inline-feedback admin-inline-feedback--status" role="status">{loading ? 'Carregando quadras…' : 'Processando operação administrativa…'}</p>}
         {feedback && <p className={`admin-inline-feedback admin-inline-feedback--${feedback.kind}`} role={feedback.kind === 'error' ? 'alert' : 'status'} aria-live={feedback.kind === 'error' ? 'assertive' : 'polite'}>{feedback.text}</p>}
         <div className="admin-map-toolbar">
-          <div className="status-panel admin-status">
-            <div><strong>{counts.total}</strong><span>Ativas</span></div>
-            <div><strong className="gray">{counts.pendente}</strong><span>Pendentes</span></div>
-            <div><strong className="green">{counts.concluida}</strong><span>Concluídas</span></div>
-            <div><strong className="orange">{counts.refazer}</strong><span>Refazer</span></div>
+          <div className="admin-status-summary" role="group" aria-label="Resumo das quadras ativas">
+            <span className="admin-status-summary-item"><strong>{counts.total}</strong> Ativas</span>
+            <span className="admin-status-summary-separator" aria-hidden="true">|</span>
+            <span className="admin-status-summary-item"><strong className="gray">{counts.pendente}</strong> Pend.</span>
+            <span className="admin-status-summary-separator" aria-hidden="true">|</span>
+            <span className="admin-status-summary-item"><strong className="green">{counts.concluida}</strong> Conc.</span>
+            <span className="admin-status-summary-separator" aria-hidden="true">|</span>
+            <span className="admin-status-summary-item"><strong className="orange">{counts.refazer}</strong> Refazer</span>
           </div>
           <label>
             Quadra selecionada
@@ -790,7 +794,8 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
         </div>
       </dialog>
       <div className="map-card admin-map-card">
-        <MapContainer center={CENTRO} zoom={14} zoomControl={false} className="map">
+        <MapContainer center={CENTRO} zoom={14} zoomControl={false} attributionControl={false} className="map">
+          <AttributionControl position="bottomleft" />
           <ZoomControl position="bottomright" />
           <TileLayer
             attribution={BASEMAP_ATTRIBUTION}
