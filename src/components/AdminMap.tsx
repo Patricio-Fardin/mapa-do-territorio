@@ -58,7 +58,7 @@ function mensagemErroLeitura(error: unknown): string {
     : 'Não foi possível carregar as quadras. Verifique a conexão e tente novamente.'
 }
 
-async function lerQuadrasPorAtividade(ativa: boolean): Promise<Quadra[]> {
+async function lerQuadrasAtivas(): Promise<Quadra[]> {
   if (!supabase) throw new Error('Supabase não configurado.')
   const pageSize = 1000
   const quadras: Quadra[] = []
@@ -66,10 +66,10 @@ async function lerQuadrasPorAtividade(ativa: boolean): Promise<Quadra[]> {
     const { data, error } = await supabase
       .from('quadras')
       .select('id,codigo,geometria,ativa,situacoes_quadras(situacao,updated_at)')
-      .eq('ativa', ativa)
+      .eq('ativa', true)
       .order('id')
       .range(offset, offset + pageSize - 1)
-    if (error) throw new Error(`Não foi possível carregar as quadras ${ativa ? 'ativas' : 'arquivadas'}.`)
+    if (error) throw new Error('Não foi possível carregar as quadras ativas.')
     quadras.push(...normalizarQuadras(data ?? []))
     if ((data?.length ?? 0) < pageSize) return quadras
   }
@@ -368,11 +368,11 @@ function AdminDrawingMap({
 
 export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
   const [quadras, setQuadras] = useState<Quadra[]>([])
-  const [quadrasArquivadas, setQuadrasArquivadas] = useState<Quadra[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [archivedSelectedId, setArchivedSelectedId] = useState<string | null>(null)
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
-  const [deletePhrase, setDeletePhrase] = useState('')
+  const [deleteError, setDeleteError] = useState('')
+  const deleteDialogRef = useRef<HTMLDialogElement | null>(null)
+  const deleteDialogReturnFocusRef = useRef<HTMLElement | null>(null)
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -389,10 +389,7 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
   }, [])
   const loadVersion = useRef(0)
   const selected = quadras.find((quadra) => quadra.id === selectedId) ?? null
-  const selectedArchived = quadrasArquivadas.find((quadra) => quadra.id === archivedSelectedId) ?? null
-  const deleteTarget = quadras.find((quadra) => quadra.id === deleteTargetId)
-    ?? quadrasArquivadas.find((quadra) => quadra.id === deleteTargetId)
-    ?? null
+  const deleteTarget = quadras.find((quadra) => quadra.id === deleteTargetId) ?? null
   const counts = useMemo(() => ({
     total: quadras.length,
     pendente: quadras.filter((quadra) => quadra.situacao === 'pendente').length,
@@ -403,15 +400,11 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
   const carregar = useCallback(async () => {
     const version = ++loadVersion.current
     try {
-      const [ativas, arquivadas] = await Promise.all([
-        lerQuadrasPorAtividade(true),
-        lerQuadrasPorAtividade(false),
-      ])
+      const ativas = await lerQuadrasAtivas()
       if (version === loadVersion.current) {
         setQuadras(ativas)
-        setQuadrasArquivadas(arquivadas)
         setSelectedId((current) => current && ativas.some((quadra) => quadra.id === current) ? current : null)
-        setArchivedSelectedId((current) => current && arquivadas.some((quadra) => quadra.id === current) ? current : null)
+        setDeleteTargetId((current) => current && ativas.some((quadra) => quadra.id === current) ? current : null)
       }
       return ativas
     } finally {
@@ -547,53 +540,70 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
     })
   }, [carregar, executarAdmin])
 
-  const arquivar = useCallback(() => {
-    if (!selected || !window.confirm(`Arquivar a quadra ${selected.codigo}? Ela deixará de aparecer no mapa público e seu histórico será preservado.`)) return
-    void executarAdmin(async () => {
-      if (!supabase) throw new Error('Supabase não configurado.')
-      const { data, error } = await supabase.rpc('admin_arquivar_quadra', { p_quadra_id: selected.id })
-      if (error || data !== true) throw new Error('O Supabase não confirmou o arquivamento.')
-      await carregar()
-      setSelectedId(null)
-      setMessage(`Quadra ${selected.codigo} arquivada. O histórico foi preservado.`)
-    })
-  }, [carregar, executarAdmin, selected])
+  useEffect(() => {
+    const dialog = deleteDialogRef.current
+    if (!dialog) return
+    if (deleteTarget && !dialog.open) {
+      const activeElement = document.activeElement
+      deleteDialogReturnFocusRef.current = activeElement instanceof HTMLElement ? activeElement : null
+      dialog.showModal()
+    } else if (!deleteTarget && dialog.open) {
+      dialog.close()
+      const previousFocus = deleteDialogReturnFocusRef.current
+      deleteDialogReturnFocusRef.current = null
+      if (previousFocus instanceof HTMLButtonElement && previousFocus.disabled) {
+        document.getElementById('admin-tools-toggle')?.focus()
+      } else {
+        previousFocus?.focus()
+      }
+    }
+  }, [deleteTarget])
 
-  const excluirDefinitivamente = useCallback((target: Quadra) => {
-    const fraseEsperada = `EXCLUIR ${target.codigo}`
-    if (deletePhrase !== fraseEsperada) return
-    if (!window.confirm(`Confirma a exclusão permanente da quadra ${target.codigo}? O registro da quadra, sua situação e todo o histórico associado serão apagados. Esta ação é irreversível.`)) return
+  const excluirQuadra = useCallback(() => {
+    if (!deleteTarget) return
+    const target = deleteTarget
+    setDeleteError('')
 
     void executarAdmin(async () => {
-      if (!supabase) throw new Error('Supabase não configurado.')
+      if (!supabase) {
+        const failure = 'O serviço de dados não está configurado. Nenhuma alteração foi realizada.'
+        setDeleteError(failure)
+        throw new Error(failure)
+      }
+
       let data: boolean | null
-      let error: { code?: string } | null
+      let error: { code?: string; message?: string } | null
       try {
-        const result = await supabase.rpc('admin_excluir_quadra', { p_quadra_id: target.id })
+        const result = await supabase.rpc('admin_arquivar_quadra', { p_quadra_id: target.id })
         data = result.data
         error = result.error
       } catch {
-        throw new Error(`A exclusão definitiva da quadra ${target.codigo} não foi confirmada. Verifique os dados atualizados antes de tentar novamente.`)
+        const failure = 'Não foi possível remover a quadra do mapa público. Nenhuma alteração foi confirmada. Atualize os dados e tente novamente.'
+        setDeleteError(failure)
+        throw new Error(failure)
       }
+
       if (error || data !== true) {
-        throw new Error(`A exclusão definitiva da quadra ${target.codigo} não foi confirmada pelo Supabase.`)
+        const failure = error?.code === '23503'
+          ? 'Não foi possível remover a quadra porque há registros vinculados. Nenhuma alteração foi realizada. Atualize os dados e tente novamente.'
+          : 'Não foi possível remover a quadra devido a uma falha no banco. Nenhuma alteração foi confirmada. Atualize os dados e tente novamente.'
+        setDeleteError(failure)
+        throw new Error(failure)
       }
 
       setQuadras((current) => current.filter((quadra) => quadra.id !== target.id))
-      setQuadrasArquivadas((current) => current.filter((quadra) => quadra.id !== target.id))
       setSelectedId((current) => current === target.id ? null : current)
-      setArchivedSelectedId((current) => current === target.id ? null : current)
       setDeleteTargetId(null)
-      setDeletePhrase('')
+      setDeleteError('')
 
       try {
         await carregar()
-        setMessage(`Quadra ${target.codigo}, sua situação e seu histórico foram excluídos definitivamente.`)
+        setMessage(`Quadra ${target.codigo} removida do mapa público. O histórico foi preservado.`)
       } catch {
-        setMessage(`A exclusão definitiva de ${target.codigo} foi confirmada pelo Supabase. Não foi possível recarregar as listas; use “Atualizar dados”.`)
+        setMessage(`Quadra ${target.codigo} removida do mapa público. O histórico foi preservado. A lista não pôde ser atualizada; use “Atualizar dados”.`)
       }
     }, { preserveDataOnRefreshFailure: true })
-  }, [carregar, deletePhrase, executarAdmin])
+  }, [carregar, deleteTarget, executarAdmin])
 
   const retryLoad = () => {
     setLoading(true)
@@ -606,6 +616,7 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
     <section className="admin-map">
       <button
         type="button"
+        id="admin-tools-toggle"
         className="admin-tools-toggle"
         aria-expanded={toolsPanelOpen}
         aria-controls="admin-tools-panel"
@@ -634,88 +645,27 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
           </label>
           {selected && <p className="selected-quadra">Selecionada: <strong>{selected.codigo}</strong> · {NOMES[selected.situacao]}</p>}
           <div className="admin-map-actions">
-            <p>Para criar, escolha o polígono: cada clique marca um vértice. Finalize clicando novamente no primeiro ponto ou dando duplo clique no último. Pressione Esc para cancelar. Para editar, selecione uma quadra no mapa ou na lista e ative a ferramenta de edição: somente a quadra selecionada exibirá vértices. Ao selecionar outra, os vértices acompanham a nova seleção. Confirme para salvar ou use X para cancelar.</p>
-            <button type="button" onClick={arquivar} disabled={!selected || busy || loading}>Arquivar quadra selecionada</button>
+            <details className="admin-map-help">
+              <summary>Ajuda para desenhar e editar</summary>
+              <p>Para criar uma quadra, use a ferramenta de polígono e finalize no primeiro ponto ou com duplo clique no último. Para editar, selecione a quadra e ative a ferramenta de edição; confirme no botão de salvar ou cancele no X.</p>
+            </details>
             <button
               type="button"
               className="destructive-action"
               onClick={() => {
                 if (!selected) return
                 setDeleteTargetId(selected.id)
-                setDeletePhrase('')
+                setDeleteError('')
                 setMessage('')
               }}
               disabled={!selected || busy || loading}
             >
-              Excluir definitivamente selecionada
+              Excluir Quadra
             </button>
-            <button type="button" onClick={retryLoad} disabled={busy || loading}>Atualizar dados</button>
+            <button type="button" className="admin-refresh-action" onClick={retryLoad} disabled={busy || loading}>Atualizar dados</button>
           </div>
         </div>
-        <div className="admin-archive-tools">
-          <label>
-            Quadras arquivadas
-            <select
-              value={archivedSelectedId ?? ''}
-              onChange={(event) => setArchivedSelectedId(event.target.value || null)}
-              disabled={busy || loading || quadrasArquivadas.length === 0}
-            >
-              <option value="">Selecione uma quadra arquivada</option>
-              {quadrasArquivadas.map((quadra) => <option key={quadra.id} value={quadra.id}>{quadra.codigo}</option>)}
-            </select>
-          </label>
-          <button
-            type="button"
-            className="destructive-action"
-            onClick={() => {
-              if (!selectedArchived) return
-              setDeleteTargetId(selectedArchived.id)
-              setDeletePhrase('')
-              setMessage('')
-            }}
-            disabled={!selectedArchived || busy || loading}
-          >
-            Excluir quadra arquivada definitivamente
-          </button>
-        </div>
-        {quadrasArquivadas.length === 0 && <p className="archived-empty">Nenhuma quadra arquivada disponível.</p>}
-        {deleteTarget && <form
-          className="delete-confirmation"
-          onSubmit={(event) => {
-            event.preventDefault()
-            excluirDefinitivamente(deleteTarget)
-          }}
-        >
-          <h3>Exclusão permanente de {deleteTarget.codigo}</h3>
-          <p>Esta ação é irreversível. Serão apagados o registro da quadra, o registro de situação e todo o histórico associado.</p>
-          <label>
-            Digite exatamente <strong>EXCLUIR {deleteTarget.codigo}</strong> para continuar
-            <input
-              type="text"
-              value={deletePhrase}
-              onChange={(event) => setDeletePhrase(event.target.value)}
-              autoComplete="off"
-              spellCheck={false}
-              disabled={busy}
-              required
-            />
-          </label>
-          <div>
-            <button type="submit" className="destructive-action" disabled={busy || deletePhrase !== 'EXCLUIR ' + deleteTarget.codigo}>
-              {busy ? 'Excluindo…' : 'Confirmar exclusão permanente'}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setDeleteTargetId(null)
-                setDeletePhrase('')
-              }}
-              disabled={busy}
-            >
-              Cancelar
-            </button>
-          </div>
-        </form>}
+
         <div className="admin-basemap-control" role="group" aria-label="Fundo do mapa administrativo">
           <span className="admin-basemap-label">Fundo do mapa</span>
           <div className="admin-basemap-options">
@@ -740,6 +690,42 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
           </div>
         </div>
       </div>}
+      <dialog
+        ref={deleteDialogRef}
+        className="admin-delete-dialog"
+        aria-labelledby="admin-delete-dialog-title"
+        aria-describedby="admin-delete-dialog-description"
+        onCancel={(event) => {
+          event.preventDefault()
+          if (busy) return
+          setDeleteTargetId(null)
+          setDeleteError('')
+        }}
+      >
+        <h2 id="admin-delete-dialog-title">Remover quadra do mapa?</h2>
+        <p id="admin-delete-dialog-description">
+          {deleteTarget
+            ? <>A quadra <strong>{deleteTarget.codigo}</strong> deixará de aparecer no mapa público. O cadastro e o histórico serão preservados no sistema.</>
+            : 'Selecione uma quadra ativa para continuar.'}
+        </p>
+        {deleteError && <p className="admin-delete-dialog-error" role="alert">{deleteError}</p>}
+        <div className="admin-delete-dialog-actions">
+          <button
+            type="button"
+            autoFocus
+            onClick={() => {
+              setDeleteTargetId(null)
+              setDeleteError('')
+            }}
+            disabled={busy}
+          >
+            Cancelar
+          </button>
+          <button type="button" className="destructive-action" onClick={excluirQuadra} disabled={!deleteTarget || busy}>
+            {busy ? 'Excluindo…' : 'Excluir'}
+          </button>
+        </div>
+      </dialog>
       {(loading || busy) && <p className="admin-map-feedback admin-map-feedback--status" role="status">{loading ? 'Carregando quadras…' : 'Processando operação administrativa…'}</p>}
       {message && <p className="admin-map-feedback admin-map-feedback--message" role="alert">{message}</p>}
       <div className="map-card admin-map-card">
