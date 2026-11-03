@@ -9,7 +9,6 @@ import {
   normalizarSituacaoQuadra,
   type SituacaoQuadra,
 } from '../lib/quadra-status'
-import { criarIdentificacaoQuadra } from '../lib/quadra-label'
 
 type Situacao = SituacaoQuadra
 type Quadra = { id: string; codigo: string; situacao: Situacao; updatedAt: string | null; geometria: Geometry; ativa: boolean }
@@ -156,7 +155,6 @@ function AdminDrawingMap({
   const map = useMap()
   const editableGroup = useRef<L.FeatureGroup | null>(null)
   const selectedEditGroup = useRef<L.FeatureGroup | null>(null)
-  const labelsGroup = useRef<L.LayerGroup | null>(null)
   const idsByLayer = useRef(new WeakMap<L.Layer, string>())
   const originalTypes = useRef(new Map<string, Geometry['type']>())
   const callbacks = useRef({ onSelect, onCreate, onGeometryEdit, onCancel })
@@ -177,17 +175,13 @@ function AdminDrawingMap({
   useEffect(() => {
     const group = L.featureGroup().addTo(map)
     const selectedGroup = L.featureGroup().addTo(map)
-    const labels = L.layerGroup().addTo(map)
     editableGroup.current = group
     selectedEditGroup.current = selectedGroup
-    labelsGroup.current = labels
     return () => {
       editableGroup.current = null
       selectedEditGroup.current = null
-      labelsGroup.current = null
       map.removeLayer(selectedGroup)
       map.removeLayer(group)
-      map.removeLayer(labels)
     }
   }, [map])
 
@@ -195,25 +189,6 @@ function AdminDrawingMap({
     const group = editableGroup.current
     const selectedGroup = selectedEditGroup.current
     if (!group || !selectedGroup) return
-    const syncLabelLayers = (items: Quadra[]) => {
-      const labelLayers = labelsGroup.current
-      if (!labelLayers) return
-      labelLayers.clearLayers()
-      if (map.getZoom() < 16) return
-      items.forEach((quadra) => {
-        const label = criarIdentificacaoQuadra(
-          map,
-          quadra.geometria,
-          quadra.codigo,
-          quadra.situacao,
-          CORES[quadra.situacao],
-          quadra.id === selectedId,
-          null,
-          { administrativo: true },
-        )
-        if (label) labelLayers.addLayer(label)
-      })
-    }
     const sync = () => {
       // O grupo usado pelo Leaflet Draw contém somente a quadra selecionada.
       // Limpar primeiro dispara layerremove e retira os vértices da seleção anterior.
@@ -237,20 +212,14 @@ function AdminDrawingMap({
           })
         })
       })
-      syncLabelLayers(currentQuadras.current)
       pendingLayerSync.current = false
       syncedSelection.current = selectedId
     }
     syncLayers.current = sync
-    const atualizarRotulos = () => syncLabelLayers(currentQuadras.current)
-    map.on('zoomend', atualizarRotulos)
     if (busyRef.current) pendingLayerSync.current = true
     else if (interactionActive.current && syncedSelection.current !== selectedId) sync()
     else if (interactionActive.current) pendingLayerSync.current = true
     else sync()
-    return () => {
-      map.off('zoomend', atualizarRotulos)
-    }
   }, [map, quadras, selectedId])
 
   useEffect(() => {
@@ -696,13 +665,10 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
         {feedback && <p className={`admin-inline-feedback admin-inline-feedback--${feedback.kind}`} role={feedback.kind === 'error' ? 'alert' : 'status'} aria-live={feedback.kind === 'error' ? 'assertive' : 'polite'}>{feedback.text}</p>}
         <div className="admin-map-toolbar">
           <div className="admin-status-summary" role="group" aria-label="Resumo das quadras ativas">
-            <span className="admin-status-summary-item"><strong>{counts.total}</strong> Ativas</span>
-            <span className="admin-status-summary-separator" aria-hidden="true">|</span>
-            <span className="admin-status-summary-item"><strong className="gray">{counts.pendente}</strong> Pend.</span>
-            <span className="admin-status-summary-separator" aria-hidden="true">|</span>
-            <span className="admin-status-summary-item"><strong className="green">{counts.concluida}</strong> Conc.</span>
-            <span className="admin-status-summary-separator" aria-hidden="true">|</span>
-            <span className="admin-status-summary-item"><strong className="orange">{counts.refazer}</strong> Refazer</span>
+            <span className="admin-status-summary-item"><strong>{counts.total}</strong><span>Ativas</span></span>
+            <span className="admin-status-summary-item"><strong className="gray">{counts.pendente}</strong><span>Pend.</span></span>
+            <span className="admin-status-summary-item"><strong className="green">{counts.concluida}</strong><span>Conc.</span></span>
+            <span className="admin-status-summary-item"><strong className="orange">{counts.refazer}</strong><span>Refazer</span></span>
           </div>
           <label>
             Quadra selecionada
