@@ -141,7 +141,6 @@ function AdminDrawingMap({
   onSelect,
   onCreate,
   onGeometryEdit,
-  onCancel,
   onRequestDelete,
   onFeedback,
 }: {
@@ -151,7 +150,6 @@ function AdminDrawingMap({
   onSelect: (id: string) => void
   onCreate: (geometry: Geometry) => void
   onGeometryEdit: (geometries: GeometriaEditada[]) => void
-  onCancel: () => void
   onRequestDelete: (id: string) => void
   onFeedback: (text: string, kind?: AdminFeedback['kind']) => void
 }) {
@@ -161,7 +159,7 @@ function AdminDrawingMap({
   const selectedEditGroup = useRef<L.FeatureGroup | null>(null)
   const idsByLayer = useRef(new WeakMap<L.Layer, string>())
   const originalTypes = useRef(new Map<string, Geometry['type']>())
-  const callbacks = useRef({ onSelect, onCreate, onGeometryEdit, onCancel, onRequestDelete, onFeedback })
+  const callbacks = useRef({ onSelect, onCreate, onGeometryEdit, onRequestDelete, onFeedback })
   const busyRef = useRef(busy)
   const interactionActive = useRef(false)
   const pendingLayerSync = useRef(false)
@@ -169,8 +167,8 @@ function AdminDrawingMap({
   const currentQuadras = useRef(quadras)
   const syncLayers = useRef<() => void>(() => {})
   useLayoutEffect(() => {
-    callbacks.current = { onSelect, onCreate, onGeometryEdit, onCancel, onRequestDelete, onFeedback }
-  }, [onSelect, onCreate, onGeometryEdit, onCancel, onRequestDelete, onFeedback])
+    callbacks.current = { onSelect, onCreate, onGeometryEdit, onRequestDelete, onFeedback }
+  }, [onSelect, onCreate, onGeometryEdit, onRequestDelete, onFeedback])
   useLayoutEffect(() => {
     busyRef.current = busy
     currentQuadras.current = quadras
@@ -279,7 +277,6 @@ function AdminDrawingMap({
       edit: { featureGroup: selectedGroup, remove: false },
     })
     map.addControl(control)
-    let editSaveRequested = false
     const atualizarBotaoSalvarEdicao = (alteracaoPendente: boolean) => {
       const saveButton = map.getContainer().querySelector<HTMLAnchorElement>('.leaflet-draw-actions a')
       if (!saveButton) return
@@ -296,7 +293,6 @@ function AdminDrawingMap({
       callbacks.current.onCreate(geometriaDaCamada(layer))
     }
     const edited = (event: L.LeafletEvent) => {
-      editSaveRequested = true
       if (busyRef.current) return
       const changed = new Set<string>()
       ;(event as L.DrawEvents.Edited).layers.eachLayer((layer) => {
@@ -344,9 +340,7 @@ function AdminDrawingMap({
       interactionStopped()
       if (doubleClickZoomWasEnabled) map.doubleClickZoom.enable()
     }
-    const drawingCancelled = () => callbacks.current.onCancel()
     const editingStarted = () => {
-      editSaveRequested = false
       atualizarBotaoSalvarEdicao(false)
       interactionStarted()
     }
@@ -355,14 +349,12 @@ function AdminDrawingMap({
       atualizarBotaoSalvarEdicao(false)
       pendingLayerSync.current = true
       interactionStopped()
-      if (!editSaveRequested) callbacks.current.onCancel()
     }
 
     map.on(L.Draw.Event.CREATED, created)
     map.on(L.Draw.Event.EDITED, edited)
     map.on(L.Draw.Event.DRAWSTART, drawingStarted)
     map.on(L.Draw.Event.DRAWSTOP, drawingStopped)
-    map.on('draw:canceled', drawingCancelled)
     map.on(L.Draw.Event.EDITSTART, editingStarted)
     map.on(L.Draw.Event.EDITVERTEX, editingVertexChanged)
     map.on(L.Draw.Event.EDITSTOP, editingStopped)
@@ -371,7 +363,6 @@ function AdminDrawingMap({
       map.off(L.Draw.Event.EDITED, edited)
       map.off(L.Draw.Event.DRAWSTART, drawingStarted)
       map.off(L.Draw.Event.DRAWSTOP, drawingStopped)
-      map.off('draw:canceled', drawingCancelled)
       map.off(L.Draw.Event.EDITSTART, editingStarted)
       map.off(L.Draw.Event.EDITVERTEX, editingVertexChanged)
       map.off(L.Draw.Event.EDITSTOP, editingStopped)
@@ -828,7 +819,6 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
             onSelect={setSelectedId}
             onCreate={criar}
             onGeometryEdit={salvarGeometrias}
-            onCancel={() => mostrarFeedback('Operação cancelada. Nenhuma alteração foi salva.', 'success')}
             onRequestDelete={solicitarExclusaoQuadra}
             onFeedback={mostrarFeedback}
           />
