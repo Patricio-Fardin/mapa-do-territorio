@@ -115,13 +115,6 @@ button:hover { border-color: #287f73; }
 .admin-status-summary-item strong.green { color: #27ae60; }
 .admin-status-summary-item strong.orange { color: #e67e22; }
 .admin-status-summary-item > span { font-weight: 600; }
-.admin-map-toolbar label { display: grid; gap: .35rem; color: #24474d; font-size: .9rem; font-weight: 700; }
-.admin-map-toolbar select { width: 100%; min-height: 42px; padding: .55rem; border: 1px solid #c8d7d9; border-radius: .45rem; background: #fff; font: inherit; }
-.selected-quadra { margin: 0; }
-.admin-map-actions { display: grid; gap: .5rem; }
-.admin-map-help { color: #60757a; font-size: .82rem; line-height: 1.4; }
-.admin-map-help summary { width: fit-content; cursor: pointer; color: #385c63; font-weight: 700; }
-.admin-map-help p { margin: .45rem 0 0; }
 .destructive-action { border-color: #a52828; background: #a52828; color: #fff; font-weight: 700; }
 .destructive-action:hover { border-color: #7f1d1d; background: #7f1d1d; }
 .admin-refresh-action { border-color: #c8d7d9; background: #fff; color: #24474d; font-weight: 600; }
@@ -387,56 +380,6 @@ button:hover { border-color: #287f73; }
   grid-template-columns: minmax(0, 1fr);
   align-items: stretch;
   gap: .7rem;
-}
-
-.admin-page--workspace .admin-map-toolbar label {
-  display: grid;
-  gap: .35rem;
-  color: #24474d;
-  font-size: .85rem;
-  font-weight: 700;
-}
-
-.admin-page--workspace .admin-map-toolbar select {
-  width: 100%;
-  min-height: 42px;
-  padding: .55rem;
-  border: 1px solid #c8d7d9;
-  border-radius: .45rem;
-  background: #fff;
-  font: inherit;
-}
-
-.admin-page--workspace .selected-quadra {
-  margin: -.25rem 0 0;
-  font-size: .85rem;
-}
-
-.admin-page--workspace .admin-map-actions {
-  display: grid;
-  gap: .5rem;
-}
-
-.admin-page--workspace .admin-map-help {
-  color: #60757a;
-  font-size: .8rem;
-  line-height: 1.4;
-}
-
-.admin-page--workspace .admin-map-help summary {
-  color: #385c63;
-  font-weight: 700;
-}
-
-.admin-page--workspace .admin-map-help p {
-  margin: .4rem 0 0;
-}
-
-.admin-page--workspace .admin-map-actions button {
-  width: 100%;
-  min-height: 40px;
-  padding: .5rem .65rem;
-  font-size: .82rem;
 }
 
 .admin-page--workspace .admin-operation-status,
@@ -876,4 +819,59 @@ button:hover { border-color: #287f73; }
     left: max(.5rem, env(safe-area-inset-left));
     width: min(240px, calc(100vw - 5rem));
   }
+}
+
+/* Menu contextual exibido sobre a quadra selecionada. */
+.admin-page--workspace .admin-quadra-context-popup .leaflet-popup-content-wrapper {
+  border: 1px solid #d9e3e4;
+  border-radius: .8rem;
+  background: #fff;
+  box-shadow: 0 6px 22px rgb(25 50 56 / 22%);
+}
+
+.admin-page--workspace .admin-quadra-context-popup .leaflet-popup-content {
+  margin: .7rem;
+}
+
+.admin-quadra-context-menu {
+  display: grid;
+  gap: .55rem;
+  min-width: 190px;
+}
+
+.admin-quadra-context-menu strong {
+  padding: .1rem .1rem .2rem;
+  color: #173d43;
+  font-size: .92rem;
+}
+
+.admin-quadra-context-menu button {
+  width: 100%;
+  min-height: 44px;
+  padding: .55rem .7rem;
+  border: 1px solid #c8d7d9;
+  border-radius: .5rem;
+  background: #f6f9f9;
+  color: #24474d;
+  font: inherit;
+  font-size: .86rem;
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.admin-quadra-context-menu button:focus-visible {
+  outline: 3px solid #3a8791;
+  outline-offset: 2px;
+}
+
+.admin-quadra-context-menu button:disabled {
+  cursor: not-allowed;
+  opacity: .6;
+}
+
+.admin-quadra-context-menu .destructive-action {
+  border-color: #a52828;
+  background: #a52828;
+  color: #fff;
 }

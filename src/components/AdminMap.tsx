@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { AttributionControl, MapContainer, TileLayer, ZoomControl, useMap } from 'react-leaflet'
+import { AttributionControl, MapContainer, Popup, TileLayer, ZoomControl, useMap } from 'react-leaflet'
 import { Wrench } from 'lucide-react'
 import L from 'leaflet'
 import type { Geometry, MultiPolygon, Polygon } from 'geojson'
@@ -18,7 +18,6 @@ type Props = { adminEmail: string; onUnauthorized: () => void }
 type AdminFeedback = { text: string; kind: 'success' | 'error' }
 
 const CORES: Record<Situacao, string> = { pendente: '#78858a', concluida: '#27ae60', refazer: '#e67e22' }
-const NOMES: Record<Situacao, string> = { pendente: 'Pendente', concluida: 'Concluída', refazer: 'Refazer' }
 const CENTRO: [number, number] = [-20.6353, -40.7498]
 type AdminBasemap = 'osm' | 'carto'
 const ADMIN_BASEMAP_STORAGE_KEY = 'mapa-territorios:admin-basemap:v1'
@@ -143,6 +142,8 @@ function AdminDrawingMap({
   onCreate,
   onGeometryEdit,
   onCancel,
+  onRequestDelete,
+  onFeedback,
 }: {
   quadras: Quadra[]
   selectedId: string | null
@@ -151,13 +152,16 @@ function AdminDrawingMap({
   onCreate: (geometry: Geometry) => void
   onGeometryEdit: (geometries: GeometriaEditada[]) => void
   onCancel: () => void
+  onRequestDelete: (id: string) => void
+  onFeedback: (text: string, kind?: AdminFeedback['kind']) => void
 }) {
   const map = useMap()
+  const [contextMenu, setContextMenu] = useState<{ quadraId: string; latlng: L.LatLng } | null>(null)
   const editableGroup = useRef<L.FeatureGroup | null>(null)
   const selectedEditGroup = useRef<L.FeatureGroup | null>(null)
   const idsByLayer = useRef(new WeakMap<L.Layer, string>())
   const originalTypes = useRef(new Map<string, Geometry['type']>())
-  const callbacks = useRef({ onSelect, onCreate, onGeometryEdit, onCancel })
+  const callbacks = useRef({ onSelect, onCreate, onGeometryEdit, onCancel, onRequestDelete, onFeedback })
   const busyRef = useRef(busy)
   const interactionActive = useRef(false)
   const pendingLayerSync = useRef(false)
@@ -165,8 +169,8 @@ function AdminDrawingMap({
   const currentQuadras = useRef(quadras)
   const syncLayers = useRef<() => void>(() => {})
   useLayoutEffect(() => {
-    callbacks.current = { onSelect, onCreate, onGeometryEdit, onCancel }
-  }, [onSelect, onCreate, onGeometryEdit, onCancel])
+    callbacks.current = { onSelect, onCreate, onGeometryEdit, onCancel, onRequestDelete, onFeedback }
+  }, [onSelect, onCreate, onGeometryEdit, onCancel, onRequestDelete, onFeedback])
   useLayoutEffect(() => {
     busyRef.current = busy
     currentQuadras.current = quadras
@@ -182,6 +186,14 @@ function AdminDrawingMap({
       selectedEditGroup.current = null
       map.removeLayer(selectedGroup)
       map.removeLayer(group)
+    }
+  }, [map])
+
+  useEffect(() => {
+    const closeContextMenu = () => setContextMenu(null)
+    map.on('click', closeContextMenu)
+    return () => {
+      map.off('click', closeContextMenu)
     }
   }, [map])
 
@@ -206,7 +218,16 @@ function AdminDrawingMap({
           feature.eachLayer((part) => {
             aplicarEstilo(part, quadra.situacao)
             idsByLayer.current.set(part, quadra.id)
-            part.on('click', () => callbacks.current.onSelect(quadra.id))
+            part.on('click', (event: L.LeafletMouseEvent) => {
+              L.DomEvent.stopPropagation(event.originalEvent)
+              if (quadra.id !== selectedId) {
+                setContextMenu(null)
+                callbacks.current.onSelect(quadra.id)
+                return
+              }
+              setContextMenu({ quadraId: quadra.id, latlng: event.latlng })
+            })
+            part.on('dblclick', (event: L.LeafletMouseEvent) => L.DomEvent.stopPropagation(event.originalEvent))
             if (quadra.id === selectedId) selectedGroup.addLayer(part)
             else group.addLayer(part)
           })
@@ -358,7 +379,49 @@ function AdminDrawingMap({
     if (bounds.isValid()) map.fitBounds(bounds.pad(.15), { maxZoom: 17 })
   }, [map, selectedId])
 
-  return null
+  const contextQuadra = contextMenu?.quadraId === selectedId
+    ? quadras.find((quadra) => quadra.id === contextMenu.quadraId) ?? null
+    : null
+
+  const iniciarEdicaoVertices = () => {
+    const editButton = map.getContainer().querySelector<HTMLAnchorElement>('.leaflet-draw-edit-edit')
+    if (!editButton || editButton.classList.contains('leaflet-disabled')) {
+      callbacks.current.onFeedback('Não foi possível iniciar a edição dos vértices. Selecione a quadra novamente e tente outra vez.')
+      return
+    }
+    editButton.click()
+    setContextMenu(null)
+  }
+
+  return (
+    <>
+      {contextMenu && contextQuadra && (
+        <Popup
+          position={contextMenu.latlng}
+          closeButton
+          closeOnClick={false}
+          autoClose={false}
+          className="admin-quadra-context-popup"
+          eventHandlers={{ remove: () => setContextMenu(null) }}
+        >
+          <div className="admin-quadra-context-menu" role="group" aria-label={`Ações da quadra ${contextQuadra.codigo}`}>
+            <strong>Quadra {contextQuadra.codigo}</strong>
+            <button type="button" onClick={iniciarEdicaoVertices} disabled={busy}>
+              Editar Vértices
+            </button>
+            <button
+              type="button"
+              className="destructive-action"
+              onClick={() => callbacks.current.onRequestDelete(contextQuadra.id)}
+              disabled={busy}
+            >
+              Excluir Quadra
+            </button>
+          </div>
+        </Popup>
+      )}
+    </>
+  )
 }
 
 export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
@@ -414,8 +477,12 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
     }
   }, [])
   const loadVersion = useRef(0)
-  const selected = quadras.find((quadra) => quadra.id === selectedId) ?? null
   const deleteTarget = quadras.find((quadra) => quadra.id === deleteTargetId) ?? null
+  const solicitarExclusaoQuadra = useCallback((quadraId: string) => {
+    setDeleteTargetId(quadraId)
+    setDeleteError('')
+    limparFeedback()
+  }, [limparFeedback])
   const counts = useMemo(() => ({
     total: quadras.length,
     pendente: quadras.filter((quadra) => quadra.situacao === 'pendente').length,
@@ -670,33 +737,6 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
             <span className="admin-status-summary-item"><strong className="green">{counts.concluida}</strong><span>Conc.</span></span>
             <span className="admin-status-summary-item"><strong className="orange">{counts.refazer}</strong><span>Refazer</span></span>
           </div>
-          <label>
-            Quadra selecionada
-            <select value={selectedId ?? ''} onChange={(event) => setSelectedId(event.target.value || null)} disabled={busy || loading}>
-              <option value="">Selecione uma quadra</option>
-              {quadras.map((quadra) => <option key={quadra.id} value={quadra.id}>{quadra.codigo}</option>)}
-            </select>
-          </label>
-          {selected && <p className="selected-quadra">Selecionada: <strong>{selected.codigo}</strong> · {NOMES[selected.situacao]}</p>}
-          <div className="admin-map-actions">
-            <details className="admin-map-help">
-              <summary>Ajuda para desenhar e editar</summary>
-              <p>Para criar uma quadra, use a ferramenta de polígono e finalize no primeiro ponto ou com duplo clique no último; a criação é salva automaticamente. Para editar, selecione a quadra e ative a ferramenta de edição. Após mover um vértice, use “Salvar Alterações do Desenho” para confirmar ou “Cancelar” para descartar.</p>
-            </details>
-            <button
-              type="button"
-              className="destructive-action"
-              onClick={() => {
-                if (!selected) return
-                setDeleteTargetId(selected.id)
-                setDeleteError('')
-                limparFeedback()
-              }}
-              disabled={!selected || busy || loading}
-            >
-              Excluir Quadra
-            </button>
-          </div>
         </div>
 
         <div className="admin-basemap-control" role="group" aria-label="Fundo do mapa administrativo">
@@ -775,6 +815,8 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
             onCreate={criar}
             onGeometryEdit={salvarGeometrias}
             onCancel={() => mostrarFeedback('Operação cancelada. Nenhuma alteração foi salva.', 'success')}
+            onRequestDelete={solicitarExclusaoQuadra}
+            onFeedback={mostrarFeedback}
           />
         </MapContainer>
       </div>
