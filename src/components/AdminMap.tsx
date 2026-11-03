@@ -153,6 +153,7 @@ function AdminDrawingMap({
 }) {
   const map = useMap()
   const editableGroup = useRef<L.FeatureGroup | null>(null)
+  const selectedEditGroup = useRef<L.FeatureGroup | null>(null)
   const labelsGroup = useRef<L.LayerGroup | null>(null)
   const idsByLayer = useRef(new WeakMap<L.Layer, string>())
   const originalTypes = useRef(new Map<string, Geometry['type']>())
@@ -160,6 +161,7 @@ function AdminDrawingMap({
   const busyRef = useRef(busy)
   const interactionActive = useRef(false)
   const pendingLayerSync = useRef(false)
+  const syncedSelection = useRef<string | null>(null)
   const currentQuadras = useRef(quadras)
   const syncLayers = useRef<() => void>(() => {})
   useLayoutEffect(() => {
@@ -172,12 +174,16 @@ function AdminDrawingMap({
 
   useEffect(() => {
     const group = L.featureGroup().addTo(map)
+    const selectedGroup = L.featureGroup().addTo(map)
     const labels = L.layerGroup().addTo(map)
     editableGroup.current = group
+    selectedEditGroup.current = selectedGroup
     labelsGroup.current = labels
     return () => {
       editableGroup.current = null
+      selectedEditGroup.current = null
       labelsGroup.current = null
+      map.removeLayer(selectedGroup)
       map.removeLayer(group)
       map.removeLayer(labels)
     }
@@ -185,7 +191,8 @@ function AdminDrawingMap({
 
   useEffect(() => {
     const group = editableGroup.current
-    if (!group) return
+    const selectedGroup = selectedEditGroup.current
+    if (!group || !selectedGroup) return
     const syncLabelLayers = (items: Quadra[]) => {
       const labelLayers = labelsGroup.current
       if (!labelLayers) return
@@ -196,6 +203,9 @@ function AdminDrawingMap({
       })
     }
     const sync = () => {
+      // O grupo usado pelo Leaflet Draw contém somente a quadra selecionada.
+      // Limpar primeiro dispara layerremove e retira os vértices da seleção anterior.
+      selectedGroup.clearLayers()
       group.clearLayers()
       idsByLayer.current = new WeakMap()
       originalTypes.current.clear()
@@ -210,22 +220,26 @@ function AdminDrawingMap({
             aplicarEstilo(part, quadra.situacao)
             idsByLayer.current.set(part, quadra.id)
             part.on('click', () => callbacks.current.onSelect(quadra.id))
-            group.addLayer(part)
+            if (quadra.id === selectedId) selectedGroup.addLayer(part)
+            else group.addLayer(part)
           })
         })
       })
       syncLabelLayers(currentQuadras.current)
       pendingLayerSync.current = false
+      syncedSelection.current = selectedId
     }
     syncLayers.current = sync
     const atualizarRotulos = () => syncLabelLayers(currentQuadras.current)
     map.on('zoomend', atualizarRotulos)
-    if (interactionActive.current || busyRef.current) pendingLayerSync.current = true
+    if (busyRef.current) pendingLayerSync.current = true
+    else if (interactionActive.current && syncedSelection.current !== selectedId) sync()
+    else if (interactionActive.current) pendingLayerSync.current = true
     else sync()
     return () => {
       map.off('zoomend', atualizarRotulos)
     }
-  }, [map, quadras])
+  }, [map, quadras, selectedId])
 
   useEffect(() => {
     if (!busy && !interactionActive.current && pendingLayerSync.current) syncLayers.current()
@@ -233,9 +247,10 @@ function AdminDrawingMap({
 
   useEffect(() => {
     const group = editableGroup.current
-    if (!group) return
+    const selectedGroup = selectedEditGroup.current
+    if (!group || !selectedGroup) return
     const control = new L.Control.Draw({
-      position: 'topleft',
+      position: 'topright',
       draw: {
         // Leaflet Draw's readableArea uses an undeclared variable in strict ESM; this crashes vertexChanged.
         polygon: { allowIntersection: false, showArea: false, maxPoints: 0, repeatMode: false },
@@ -245,7 +260,7 @@ function AdminDrawingMap({
         marker: false,
         polyline: false,
       },
-      edit: { featureGroup: group, remove: false },
+      edit: { featureGroup: selectedGroup, remove: false },
     })
     map.addControl(control)
     let editSaveRequested = false
@@ -266,7 +281,7 @@ function AdminDrawingMap({
       if (!changed.size || !editableGroup.current) return
       const geometries = [...changed].flatMap((id) => {
         const parts: Geometry[] = []
-        editableGroup.current?.eachLayer((layer) => {
+        selectedEditGroup.current?.eachLayer((layer) => {
           if (idsByLayer.current.get(layer) === id) parts.push(geometriaDaCamada(layer))
         })
         if (!parts.length) return []
@@ -342,15 +357,10 @@ function AdminDrawingMap({
   }, [map, busy])
 
   useEffect(() => {
-    if (!selectedId || !editableGroup.current) return
-    const selectedLayers: L.Layer[] = []
-    editableGroup.current.eachLayer((layer) => {
-      if (idsByLayer.current.get(layer) === selectedId) selectedLayers.push(layer)
-    })
-    if (selectedLayers.length) {
-      const bounds = L.featureGroup(selectedLayers).getBounds()
-      if (bounds.isValid()) map.fitBounds(bounds.pad(.15), { maxZoom: 17 })
-    }
+    const selectedGroup = selectedEditGroup.current
+    if (!selectedId || !selectedGroup) return
+    const bounds = selectedGroup.getBounds()
+    if (bounds.isValid()) map.fitBounds(bounds.pad(.15), { maxZoom: 17 })
   }, [map, selectedId])
 
   return null
@@ -367,6 +377,7 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(true)
   const [baseMap, setBaseMap] = useState<AdminBasemap>(carregarPreferenciaBaseMap)
+  const [toolsPanelOpen, setToolsPanelOpen] = useState(false)
   const operationLock = useRef(false)
   const selecionarBaseMap = useCallback((nextBaseMap: AdminBasemap) => {
     setBaseMap(nextBaseMap)
@@ -593,129 +604,144 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
 
   return (
     <section className="admin-map">
-      <div className="admin-map-toolbar" aria-label="Ferramentas administrativas">
-        <div className="status-panel admin-status">
-          <div><strong>{counts.total}</strong><span>Ativas</span></div>
-          <div><strong className="gray">{counts.pendente}</strong><span>Pendentes</span></div>
-          <div><strong className="green">{counts.concluida}</strong><span>Concluídas</span></div>
-          <div><strong className="orange">{counts.refazer}</strong><span>Refazer</span></div>
+      <button
+        type="button"
+        className="admin-tools-toggle"
+        aria-expanded={toolsPanelOpen}
+        aria-controls="admin-tools-panel"
+        onClick={() => setToolsPanelOpen((open) => !open)}
+      >
+        {toolsPanelOpen ? 'Ocultar ferramentas' : 'Ferramentas administrativas'}
+      </button>
+      {toolsPanelOpen && <div id="admin-tools-panel" className="admin-tools-panel" aria-label="Ferramentas administrativas">
+        <div className="admin-tools-panel-heading">
+          <strong>Ferramentas administrativas</strong>
+          <button type="button" onClick={() => setToolsPanelOpen(false)} aria-label="Fechar ferramentas administrativas">×</button>
         </div>
-        <label>
-          Quadra selecionada
-          <select value={selectedId ?? ''} onChange={(event) => setSelectedId(event.target.value || null)} disabled={busy || loading}>
-            <option value="">Selecione uma quadra</option>
-            {quadras.map((quadra) => <option key={quadra.id} value={quadra.id}>{quadra.codigo}</option>)}
-          </select>
-        </label>
-        {selected && <p className="selected-quadra">Selecionada: <strong>{selected.codigo}</strong> · {NOMES[selected.situacao]}</p>}
-        <div className="admin-map-actions">
-          <p>Para criar, escolha o polígono: cada clique marca um vértice. Finalize clicando novamente no primeiro ponto ou dando duplo clique no último. A ferramenta desativa ao concluir; clique no polígono novamente para criar outra quadra. Pressione Esc para cancelar. Para editar, selecione a ferramenta de edição, ajuste os vértices e confirme; o X cancela e restaura a geometria salva.</p>
-          <button type="button" onClick={arquivar} disabled={!selected || busy || loading}>Arquivar quadra selecionada</button>
+        <div className="admin-map-toolbar">
+          <div className="status-panel admin-status">
+            <div><strong>{counts.total}</strong><span>Ativas</span></div>
+            <div><strong className="gray">{counts.pendente}</strong><span>Pendentes</span></div>
+            <div><strong className="green">{counts.concluida}</strong><span>Concluídas</span></div>
+            <div><strong className="orange">{counts.refazer}</strong><span>Refazer</span></div>
+          </div>
+          <label>
+            Quadra selecionada
+            <select value={selectedId ?? ''} onChange={(event) => setSelectedId(event.target.value || null)} disabled={busy || loading}>
+              <option value="">Selecione uma quadra</option>
+              {quadras.map((quadra) => <option key={quadra.id} value={quadra.id}>{quadra.codigo}</option>)}
+            </select>
+          </label>
+          {selected && <p className="selected-quadra">Selecionada: <strong>{selected.codigo}</strong> · {NOMES[selected.situacao]}</p>}
+          <div className="admin-map-actions">
+            <p>Para criar, escolha o polígono: cada clique marca um vértice. Finalize clicando novamente no primeiro ponto ou dando duplo clique no último. Pressione Esc para cancelar. Para editar, selecione uma quadra no mapa ou na lista e ative a ferramenta de edição: somente a quadra selecionada exibirá vértices. Ao selecionar outra, os vértices acompanham a nova seleção. Confirme para salvar ou use X para cancelar.</p>
+            <button type="button" onClick={arquivar} disabled={!selected || busy || loading}>Arquivar quadra selecionada</button>
+            <button
+              type="button"
+              className="destructive-action"
+              onClick={() => {
+                if (!selected) return
+                setDeleteTargetId(selected.id)
+                setDeletePhrase('')
+                setMessage('')
+              }}
+              disabled={!selected || busy || loading}
+            >
+              Excluir definitivamente selecionada
+            </button>
+            <button type="button" onClick={retryLoad} disabled={busy || loading}>Atualizar dados</button>
+          </div>
+        </div>
+        <div className="admin-archive-tools">
+          <label>
+            Quadras arquivadas
+            <select
+              value={archivedSelectedId ?? ''}
+              onChange={(event) => setArchivedSelectedId(event.target.value || null)}
+              disabled={busy || loading || quadrasArquivadas.length === 0}
+            >
+              <option value="">Selecione uma quadra arquivada</option>
+              {quadrasArquivadas.map((quadra) => <option key={quadra.id} value={quadra.id}>{quadra.codigo}</option>)}
+            </select>
+          </label>
           <button
             type="button"
             className="destructive-action"
             onClick={() => {
-              if (!selected) return
-              setDeleteTargetId(selected.id)
+              if (!selectedArchived) return
+              setDeleteTargetId(selectedArchived.id)
               setDeletePhrase('')
               setMessage('')
             }}
-            disabled={!selected || busy || loading}
+            disabled={!selectedArchived || busy || loading}
           >
-            Excluir definitivamente selecionada
+            Excluir quadra arquivada definitivamente
           </button>
-          <button type="button" onClick={retryLoad} disabled={busy || loading}>Atualizar dados</button>
         </div>
-      </div>
-      <div className="admin-archive-tools">
-        <label>
-          Quadras arquivadas
-          <select
-            value={archivedSelectedId ?? ''}
-            onChange={(event) => setArchivedSelectedId(event.target.value || null)}
-            disabled={busy || loading || quadrasArquivadas.length === 0}
-          >
-            <option value="">Selecione uma quadra arquivada</option>
-            {quadrasArquivadas.map((quadra) => <option key={quadra.id} value={quadra.id}>{quadra.codigo}</option>)}
-          </select>
-        </label>
-        <button
-          type="button"
-          className="destructive-action"
-          onClick={() => {
-            if (!selectedArchived) return
-            setDeleteTargetId(selectedArchived.id)
-            setDeletePhrase('')
-            setMessage('')
+        {quadrasArquivadas.length === 0 && <p className="archived-empty">Nenhuma quadra arquivada disponível.</p>}
+        {deleteTarget && <form
+          className="delete-confirmation"
+          onSubmit={(event) => {
+            event.preventDefault()
+            excluirDefinitivamente(deleteTarget)
           }}
-          disabled={!selectedArchived || busy || loading}
         >
-          Excluir quadra arquivada definitivamente
-        </button>
-      </div>
-      {quadrasArquivadas.length === 0 && <p className="archived-empty">Nenhuma quadra arquivada disponível.</p>}
-      {deleteTarget && <form
-        className="delete-confirmation"
-        onSubmit={(event) => {
-          event.preventDefault()
-          excluirDefinitivamente(deleteTarget)
-        }}
-      >
-        <h3>Exclusão permanente de {deleteTarget.codigo}</h3>
-        <p>Esta ação é irreversível. Serão apagados o registro da quadra, o registro de situação e todo o histórico associado.</p>
-        <label>
-          Digite exatamente <strong>EXCLUIR {deleteTarget.codigo}</strong> para continuar
-          <input
-            type="text"
-            value={deletePhrase}
-            onChange={(event) => setDeletePhrase(event.target.value)}
-            autoComplete="off"
-            spellCheck={false}
-            disabled={busy}
-            required
-          />
-        </label>
-        <div>
-          <button type="submit" className="destructive-action" disabled={busy || deletePhrase !== `EXCLUIR ${deleteTarget.codigo}`}>
-            {busy ? 'Excluindo…' : 'Confirmar exclusão permanente'}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setDeleteTargetId(null)
-              setDeletePhrase('')
-            }}
-            disabled={busy}
-          >
-            Cancelar
-          </button>
+          <h3>Exclusão permanente de {deleteTarget.codigo}</h3>
+          <p>Esta ação é irreversível. Serão apagados o registro da quadra, o registro de situação e todo o histórico associado.</p>
+          <label>
+            Digite exatamente <strong>EXCLUIR {deleteTarget.codigo}</strong> para continuar
+            <input
+              type="text"
+              value={deletePhrase}
+              onChange={(event) => setDeletePhrase(event.target.value)}
+              autoComplete="off"
+              spellCheck={false}
+              disabled={busy}
+              required
+            />
+          </label>
+          <div>
+            <button type="submit" className="destructive-action" disabled={busy || deletePhrase !== 'EXCLUIR ' + deleteTarget.codigo}>
+              {busy ? 'Excluindo…' : 'Confirmar exclusão permanente'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setDeleteTargetId(null)
+                setDeletePhrase('')
+              }}
+              disabled={busy}
+            >
+              Cancelar
+            </button>
+          </div>
+        </form>}
+        <div className="admin-basemap-control" role="group" aria-label="Fundo do mapa administrativo">
+          <span className="admin-basemap-label">Fundo do mapa</span>
+          <div className="admin-basemap-options">
+            <button
+              type="button"
+              className={baseMap === 'osm' ? 'admin-basemap-option is-active' : 'admin-basemap-option'}
+              aria-pressed={baseMap === 'osm'}
+              onClick={() => selecionarBaseMap('osm')}
+            >
+              Padrão (OSM)
+            </button>
+            <button
+              type="button"
+              className={baseMap === 'carto' ? 'admin-basemap-option is-active' : 'admin-basemap-option'}
+              aria-pressed={baseMap === 'carto'}
+              onClick={() => selecionarBaseMap('carto')}
+              disabled={!import.meta.env.VITE_CARTO_BASEMAP_KEY}
+              title={import.meta.env.VITE_CARTO_BASEMAP_KEY ? 'Usar o mapa minimalista da CARTO' : 'Configure VITE_CARTO_BASEMAP_KEY para habilitar o mapa CARTO'}
+            >
+              Minimalista (CARTO)
+            </button>
+          </div>
         </div>
-      </form>}
-      {(loading || busy) && <p role="status">{loading ? 'Carregando quadras…' : 'Processando operação administrativa…'}</p>}
-      {message && <p role="alert">{message}</p>}
-      <div className="admin-basemap-control" role="group" aria-label="Fundo do mapa administrativo">
-        <span className="admin-basemap-label">Fundo do mapa</span>
-        <div className="admin-basemap-options">
-          <button
-            type="button"
-            className={baseMap === 'osm' ? 'admin-basemap-option is-active' : 'admin-basemap-option'}
-            aria-pressed={baseMap === 'osm'}
-            onClick={() => selecionarBaseMap('osm')}
-          >
-            Padrão (OSM)
-          </button>
-          <button
-            type="button"
-            className={baseMap === 'carto' ? 'admin-basemap-option is-active' : 'admin-basemap-option'}
-            aria-pressed={baseMap === 'carto'}
-            onClick={() => selecionarBaseMap('carto')}
-            disabled={!import.meta.env.VITE_CARTO_BASEMAP_KEY}
-            title={import.meta.env.VITE_CARTO_BASEMAP_KEY ? 'Usar o mapa minimalista da CARTO' : 'Configure VITE_CARTO_BASEMAP_KEY para habilitar o mapa CARTO'}
-          >
-            Minimalista (CARTO)
-          </button>
-        </div>
-      </div>
+      </div>}
+      {(loading || busy) && <p className="admin-map-feedback admin-map-feedback--status" role="status">{loading ? 'Carregando quadras…' : 'Processando operação administrativa…'}</p>}
+      {message && <p className="admin-map-feedback admin-map-feedback--message" role="alert">{message}</p>}
       <div className="map-card admin-map-card">
         <MapContainer center={CENTRO} zoom={14} zoomControl={false} className="map">
           <ZoomControl position="bottomright" />

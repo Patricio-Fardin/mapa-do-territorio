@@ -316,7 +316,6 @@ function MapReference({
     locationPane.style.pointerEvents = 'none'
 
     const locationLayers = L.layerGroup().addTo(map)
-    let accuracyCircle: L.Circle | null = null
     let locationMarker: L.Marker | null = null
     const locationIcon = L.divIcon({
       className: 'user-location-icon',
@@ -328,24 +327,6 @@ function MapReference({
     const locationFound = (event: L.LocationEvent) => {
       onLocationFound(event)
       locationMarker?.getElement()?.classList.remove('user-location-icon--stale')
-      if (!accuracyCircle) {
-        accuracyCircle = L.circle(event.latlng, {
-          radius: Math.max(0, event.accuracy),
-          color: '#1a73e8',
-          weight: 1.5,
-          opacity: 0.8,
-          fillColor: '#4285f4',
-          fillOpacity: 0.16,
-          interactive: false,
-          pane: 'userLocationPane',
-        })
-        locationLayers.addLayer(accuracyCircle)
-      } else {
-        accuracyCircle.setLatLng(event.latlng)
-        accuracyCircle.setRadius(Math.max(0, event.accuracy))
-        accuracyCircle.setStyle({ opacity: 0.8, fillOpacity: 0.16 })
-      }
-
       if (!locationMarker) {
         locationMarker = L.marker(event.latlng, {
           icon: locationIcon,
@@ -362,11 +343,9 @@ function MapReference({
     const locationError = (event: L.ErrorEvent) => {
       if (event.code === 1) {
         locationLayers.clearLayers()
-        accuracyCircle = null
         locationMarker = null
       } else {
         locationMarker?.getElement()?.classList.add('user-location-icon--stale')
-        accuracyCircle?.setStyle({ opacity: 0.4, fillOpacity: 0.08 })
       }
       onLocationError(event.code)
     }
@@ -796,43 +775,50 @@ function AdminPage({ onBack }: { onBack: () => void }) {
   }
 
   return (
-    <main className={`admin-page${autorizado ? ' admin-page-wide' : ''}`}>
-      <button onClick={onBack}>← Voltar ao mapa</button>
-      <h1>Área administrativa</h1>
-      {loadingMessage && <p role="status">{loadingMessage}</p>}
-      {!loadingMessage && autorizado ? (
-        <section>
-          <p>Sessão administrativa validada. Alterações estruturais são salvas pelo Supabase e protegidas pelas funções administrativas do banco.</p>
+    <main className={autorizado ? 'admin-page admin-page--workspace' : 'admin-page'}>
+      {autorizado ? (
+        <>
+          <header className="admin-workspace-header">
+            <button type="button" onClick={onBack}>← Mapa público</button>
+            <h1>Área administrativa</h1>
+            <button className="primary-action" type="button" onClick={() => void sair()} disabled={Boolean(loadingMessage) || !client}>Encerrar sessão</button>
+          </header>
           <AdminMap
             adminEmail={adminLoginEmail}
             onUnauthorized={onAdminUnauthorized}
           />
-          <button className="primary-action" onClick={() => void sair()} disabled={Boolean(loadingMessage) || !client}>Encerrar sessão</button>
-        </section>
-      ) : !loadingMessage && view === 'login' ? (
-        <form onSubmit={(event) => void entrar(event)}>
-          <p>Entre com o nome de usuário e a senha da conta administrativa existente.</p>
-          <label>Nome de usuário<input type="text" value={username} onChange={(event) => setUsername(event.target.value)} required autoComplete="username" disabled={configurationIncomplete} /></label>
-          <label>Senha<input type={showPassword ? 'text' : 'password'} value={password} onChange={(event) => setPassword(event.target.value)} required autoComplete="current-password" disabled={configurationIncomplete} /></label>
-          <button type="button" onClick={() => setShowPassword((visible) => !visible)} disabled={configurationIncomplete}>{showPassword ? 'Ocultar senha' : 'Mostrar senha'}</button>
-          <button className="primary-action" type="submit" disabled={configurationIncomplete}>Entrar</button>
-          <button type="button" onClick={() => { setView('recovery-request'); setMessage('') }} disabled={configurationIncomplete}>Esqueci minha senha</button>
-        </form>
-      ) : !loadingMessage && view === 'recovery-request' ? (
-        <form onSubmit={(event) => void solicitarRecuperacao(event)}>
-          <p>Solicite um link de recuperação para a conta administrativa. O link será enviado ao e-mail associado a essa conta.</p>
-          <button className="primary-action" type="submit" disabled={configurationIncomplete}>Enviar link de recuperação</button>
-          <button type="button" onClick={() => { setView('login'); setMessage('') }}>Voltar ao login</button>
-        </form>
-      ) : !loadingMessage && view === 'recovery-password' ? (
-        <form onSubmit={(event) => void atualizarSenha(event)}>
-          <p>Defina uma nova senha para a conta administrativa autorizada.</p>
-          <label>Nova senha<input type={showPassword ? 'text' : 'password'} value={password} onChange={(event) => setPassword(event.target.value)} required minLength={6} autoComplete="new-password" /></label>
-          <label>Confirme a nova senha<input type={showPassword ? 'text' : 'password'} value={passwordConfirmation} onChange={(event) => setPasswordConfirmation(event.target.value)} required minLength={6} autoComplete="new-password" /></label>
-          <button type="button" onClick={() => setShowPassword((visible) => !visible)}>{showPassword ? 'Ocultar senha' : 'Mostrar senha'}</button>
-          <button className="primary-action" type="submit">Atualizar senha</button>
-        </form>
-      ) : null}
+        </>
+      ) : (
+        <>
+          <button onClick={onBack}>← Voltar ao mapa</button>
+          <h1>Área administrativa</h1>
+          {loadingMessage && <p role="status">{loadingMessage}</p>}
+          {!loadingMessage && view === 'login' ? (
+            <form onSubmit={(event) => void entrar(event)}>
+              <p>Entre com o nome de usuário e a senha da conta administrativa existente.</p>
+              <label>Nome de usuário<input type="text" value={username} onChange={(event) => setUsername(event.target.value)} required autoComplete="username" disabled={configurationIncomplete} /></label>
+              <label>Senha<input type={showPassword ? 'text' : 'password'} value={password} onChange={(event) => setPassword(event.target.value)} required autoComplete="current-password" disabled={configurationIncomplete} /></label>
+              <button type="button" onClick={() => setShowPassword((visible) => !visible)} disabled={configurationIncomplete}>{showPassword ? 'Ocultar senha' : 'Mostrar senha'}</button>
+              <button className="primary-action" type="submit" disabled={configurationIncomplete}>Entrar</button>
+              <button type="button" onClick={() => { setView('recovery-request'); setMessage('') }} disabled={configurationIncomplete}>Esqueci minha senha</button>
+            </form>
+          ) : !loadingMessage && view === 'recovery-request' ? (
+            <form onSubmit={(event) => void solicitarRecuperacao(event)}>
+              <p>Solicite um link de recuperação para a conta administrativa. O link será enviado ao e-mail associado a essa conta.</p>
+              <button className="primary-action" type="submit" disabled={configurationIncomplete}>Enviar link de recuperação</button>
+              <button type="button" onClick={() => { setView('login'); setMessage('') }}>Voltar ao login</button>
+            </form>
+          ) : !loadingMessage && view === 'recovery-password' ? (
+            <form onSubmit={(event) => void atualizarSenha(event)}>
+              <p>Defina uma nova senha para a conta administrativa autorizada.</p>
+              <label>Nova senha<input type={showPassword ? 'text' : 'password'} value={password} onChange={(event) => setPassword(event.target.value)} required minLength={6} autoComplete="new-password" /></label>
+              <label>Confirme a nova senha<input type={showPassword ? 'text' : 'password'} value={passwordConfirmation} onChange={(event) => setPasswordConfirmation(event.target.value)} required minLength={6} autoComplete="new-password" /></label>
+              <button type="button" onClick={() => setShowPassword((visible) => !visible)}>{showPassword ? 'Ocultar senha' : 'Mostrar senha'}</button>
+              <button className="primary-action" type="submit">Atualizar senha</button>
+            </form>
+          ) : null}
+        </>
+      )}
       {message && <p role="alert">{message}</p>}
     </main>
   )

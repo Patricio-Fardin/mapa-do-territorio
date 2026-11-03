@@ -160,3 +160,381 @@ button:hover { border-color: #287f73; }
 @media (max-width: 380px) {
   .public-status-panel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* Área administrativa em tela cheia, com controles flutuantes sobre o mapa. */
+.admin-page--workspace {
+  position: fixed;
+  z-index: 500;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: #f4f7f8;
+  box-shadow: none;
+}
+
+.admin-workspace-header {
+  position: absolute;
+  z-index: 1200;
+  top: max(.6rem, env(safe-area-inset-top));
+  left: max(.6rem, env(safe-area-inset-left));
+  right: max(.6rem, env(safe-area-inset-right));
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  min-height: 52px;
+  padding: .4rem .55rem;
+  border: 1px solid rgb(255 255 255 / 82%);
+  border-radius: .9rem;
+  background: rgb(255 255 255 / 90%);
+  box-shadow: 0 4px 18px rgb(25 50 56 / 16%);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.admin-workspace-header h1 {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: clamp(1rem, 2.2vw, 1.35rem);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-workspace-header button {
+  flex: 0 0 auto;
+  min-height: 40px;
+  padding: .45rem .65rem;
+  font-size: .82rem;
+  white-space: nowrap;
+}
+
+.admin-page--workspace > [role="alert"] {
+  position: absolute;
+  z-index: 1300;
+  top: calc(max(.6rem, env(safe-area-inset-top)) + 4.2rem);
+  left: 50%;
+  width: min(520px, calc(100% - 1.5rem));
+  margin: 0;
+  padding: .6rem .8rem;
+  transform: translateX(-50%);
+  border: 1px solid #d9e3e4;
+  border-radius: .7rem;
+  background: rgb(255 255 255 / 95%);
+  color: #24474d;
+  box-shadow: 0 4px 16px rgb(25 50 56 / 14%);
+  font-size: .85rem;
+}
+
+.admin-page--workspace > .admin-map {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+}
+
+.admin-page--workspace .admin-map-card {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  margin: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.admin-page--workspace .admin-map-card .map {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.admin-page--workspace .admin-map-card .leaflet-top.leaflet-right {
+  top: calc(max(.6rem, env(safe-area-inset-top)) + 4.15rem);
+  right: max(.6rem, env(safe-area-inset-right));
+}
+
+.admin-tools-toggle {
+  position: absolute;
+  z-index: 1100;
+  top: calc(max(.6rem, env(safe-area-inset-top)) + 4.15rem);
+  left: max(.6rem, env(safe-area-inset-left));
+  min-height: 42px;
+  padding: .5rem .75rem;
+  border: 1px solid rgb(255 255 255 / 85%);
+  border-radius: .7rem;
+  background: rgb(255 255 255 / 94%);
+  color: #193238;
+  box-shadow: 0 3px 14px rgb(25 50 56 / 17%);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  font-weight: 700;
+}
+
+.admin-tools-toggle:focus-visible,
+.admin-tools-panel button:focus-visible {
+  outline: 3px solid #3a8791;
+  outline-offset: 2px;
+}
+
+.admin-tools-panel {
+  position: absolute;
+  z-index: 1150;
+  top: calc(max(.6rem, env(safe-area-inset-top)) + 7.25rem);
+  bottom: max(.6rem, env(safe-area-inset-bottom));
+  left: max(.6rem, env(safe-area-inset-left));
+  display: grid;
+  align-content: start;
+  gap: .8rem;
+  width: min(370px, calc(100vw - 1.2rem));
+  max-height: calc(100dvh - 8rem);
+  padding: .85rem;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid rgb(255 255 255 / 85%);
+  border-radius: .9rem;
+  background: rgb(255 255 255 / 96%);
+  box-shadow: 0 8px 28px rgb(25 50 56 / 22%);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.admin-tools-panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .6rem;
+  color: #173d43;
+}
+
+.admin-tools-panel-heading > button {
+  display: grid;
+  width: 38px;
+  min-height: 38px;
+  padding: 0;
+  place-items: center;
+  font-size: 1.45rem;
+  line-height: 1;
+}
+
+.admin-page--workspace .admin-map-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  gap: .7rem;
+}
+
+.admin-page--workspace .admin-status {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .4rem;
+}
+
+.admin-page--workspace .admin-status div {
+  padding: .55rem .65rem;
+}
+
+.admin-page--workspace .admin-status strong {
+  font-size: 1.15rem;
+}
+
+.admin-page--workspace .admin-status span {
+  font-size: .72rem;
+}
+
+.admin-page--workspace .admin-map-toolbar label,
+.admin-page--workspace .admin-archive-tools label {
+  display: grid;
+  gap: .35rem;
+  color: #24474d;
+  font-size: .85rem;
+  font-weight: 700;
+}
+
+.admin-page--workspace .admin-map-toolbar select,
+.admin-page--workspace .admin-archive-tools select {
+  width: 100%;
+  min-height: 42px;
+  padding: .55rem;
+  border: 1px solid #c8d7d9;
+  border-radius: .45rem;
+  background: #fff;
+  font: inherit;
+}
+
+.admin-page--workspace .selected-quadra {
+  margin: -.25rem 0 0;
+  font-size: .85rem;
+}
+
+.admin-page--workspace .admin-map-actions {
+  display: grid;
+  gap: .5rem;
+}
+
+.admin-page--workspace .admin-map-actions p {
+  margin: 0;
+  color: #60757a;
+  font-size: .8rem;
+  line-height: 1.4;
+}
+
+.admin-page--workspace .admin-map-actions button,
+.admin-page--workspace .admin-archive-tools > button {
+  width: 100%;
+  min-height: 40px;
+  padding: .5rem .65rem;
+  font-size: .82rem;
+}
+
+.admin-page--workspace .admin-archive-tools {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  gap: .6rem;
+  padding: .7rem;
+  border: 1px solid #e6caca;
+  border-radius: .65rem;
+  background: #fffafa;
+}
+
+.admin-page--workspace .archived-empty {
+  margin: -.4rem 0 0;
+  color: #60757a;
+  font-size: .82rem;
+}
+
+.admin-page--workspace .delete-confirmation {
+  gap: .6rem;
+  padding: .8rem;
+}
+
+.admin-page--workspace .delete-confirmation h3 {
+  font-size: .95rem;
+}
+
+.admin-page--workspace .delete-confirmation p {
+  font-size: .82rem;
+}
+
+.admin-page--workspace .delete-confirmation > div {
+  display: grid;
+  grid-template-columns: 1fr;
+}
+
+.admin-page--workspace .delete-confirmation button {
+  width: 100%;
+  min-height: 40px;
+  padding: .5rem .65rem;
+  font-size: .82rem;
+}
+
+.admin-page--workspace .admin-operation-status,
+.admin-page--workspace .admin-operation-message {
+  margin: 0;
+  padding: .55rem .65rem;
+  border-radius: .5rem;
+  background: #f1f6f6;
+  color: #24474d;
+  font-size: .82rem;
+  line-height: 1.35;
+}
+
+.admin-page--workspace .admin-basemap-control {
+  display: grid;
+  gap: .45rem;
+  min-height: 0;
+  padding: .65rem;
+}
+
+.admin-page--workspace .admin-basemap-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .35rem;
+}
+
+.admin-page--workspace .admin-basemap-option {
+  min-width: 0;
+  padding: .45rem;
+  font-size: .78rem;
+}
+
+.admin-page--workspace .admin-map-feedback {
+  position: absolute;
+  z-index: 1250;
+  left: 50%;
+  width: min(600px, calc(100vw - 1.5rem));
+  max-height: 22vh;
+  margin: 0;
+  padding: .65rem .85rem;
+  overflow: auto;
+  transform: translateX(-50%);
+  border: 1px solid #d9e3e4;
+  border-radius: .7rem;
+  background: rgb(255 255 255 / 96%);
+  color: #24474d;
+  box-shadow: 0 4px 16px rgb(25 50 56 / 18%);
+  font-size: .85rem;
+  line-height: 1.35;
+}
+
+.admin-page--workspace .admin-map-feedback--status {
+  top: calc(max(.6rem, env(safe-area-inset-top)) + 7.3rem);
+}
+
+.admin-page--workspace .admin-map-feedback--message {
+  bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+/* Ajustes compactos para telas estreitas. */
+@media (max-width: 640px) {
+  .admin-workspace-header {
+    gap: .35rem;
+    padding: .35rem;
+  }
+
+  .admin-workspace-header button {
+    min-height: 38px;
+    padding: .4rem .5rem;
+    font-size: .74rem;
+  }
+
+  .admin-workspace-header h1 {
+    font-size: .95rem;
+  }
+
+  .admin-tools-panel {
+    width: min(350px, calc(100vw - 1rem));
+    top: calc(max(.5rem, env(safe-area-inset-top)) + 7rem);
+    bottom: max(.5rem, env(safe-area-inset-bottom));
+    left: max(.5rem, env(safe-area-inset-left));
+    max-height: calc(100dvh - 7.6rem);
+    padding: .7rem;
+  }
+
+  .admin-tools-toggle {
+    top: calc(max(.5rem, env(safe-area-inset-top)) + 4.05rem);
+    left: max(.5rem, env(safe-area-inset-left));
+  }
+
+  .admin-page--workspace .admin-map-card .leaflet-top.leaflet-right {
+    top: calc(max(.5rem, env(safe-area-inset-top)) + 4.05rem);
+    right: max(.5rem, env(safe-area-inset-right));
+  }
+
+  .admin-page--workspace > [role="alert"] {
+    top: calc(max(.5rem, env(safe-area-inset-top)) + 7rem);
+  }
+}
