@@ -711,12 +711,12 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
 
       try {
         await carregar()
-        mostrarFeedback(`Quadra ${target.codigo} removida do mapa público. O histórico foi preservado.`, 'success')
+        mostrarToastCriacao(`Quadra ${target.codigo} removida do mapa público. O histórico foi preservado.`)
       } catch {
-        mostrarFeedback(`Quadra ${target.codigo} removida do mapa público. O histórico foi preservado. A lista será sincronizada automaticamente.`)
+        mostrarToastCriacao(`Quadra ${target.codigo} removida do mapa público. O histórico foi preservado. A lista será sincronizada automaticamente.`)
       }
-    }, { preserveDataOnRefreshFailure: true })
-  }, [carregar, deleteTarget, executarAdmin, mostrarFeedback])
+    }, { preserveDataOnRefreshFailure: true, openToolsPanel: false })
+  }, [carregar, deleteTarget, executarAdmin, mostrarToastCriacao])
 
   return (
     <section className={toolsPanelOpen ? 'admin-map admin-map--tools-open' : 'admin-map'}>
