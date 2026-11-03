@@ -39,6 +39,19 @@ button:hover { border-color: #287f73; }
 .map-navigation-button:focus-visible { outline: 3px solid #174f70; outline-offset: 3px; }
 .map-navigation-button:active { transform: scale(.94); background: #e4eff1; box-shadow: 0 1px 5px rgb(25 50 56 / 22%); }
 .map-location-button:disabled { cursor: wait; opacity: .7; }
+.map-location-button[aria-pressed="true"] { border-color: #8ab4f8; background: #e8f1ff; color: #1a73e8; }
+.user-location-icon { border: 0; background: transparent; }
+.user-location-pulse { position: absolute; inset: 0; border-radius: 50%; background: rgb(26 115 232 / 22%); animation: user-location-pulse 1.8s ease-out infinite; }
+.user-location-dot { position: absolute; top: 7px; left: 7px; width: 10px; height: 10px; box-sizing: border-box; border: 2px solid #fff; border-radius: 50%; background: #1a73e8; box-shadow: 0 1px 5px rgb(0 0 0 / 35%); }
+.user-location-icon--stale .user-location-pulse { animation: none; opacity: .12; transform: scale(1.3); }
+.user-location-icon--stale .user-location-dot { background: #718096; }
+@keyframes user-location-pulse {
+  0% { transform: scale(.45); opacity: .75; }
+  80%, 100% { transform: scale(1.55); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .user-location-pulse { animation: none; opacity: .22; transform: scale(1.3); }
+}
 .map-location-feedback { position: absolute; z-index: 850; bottom: calc(1.75rem + env(safe-area-inset-bottom)); left: max(.6rem, env(safe-area-inset-left)); max-width: min(340px, calc(100% - 1.5rem)); margin: 0; padding: .6rem .8rem; border: 1px solid #d6e2e4; border-radius: .7rem; background: rgb(255 255 255 / 94%); color: #24474d; box-shadow: 0 4px 16px rgb(25 50 56 / 14%); font-size: .85rem; line-height: 1.35; }
 @media (hover: hover) and (pointer: fine) {
   .map-navigation-button:hover { transform: translateY(-1px); border-color: #8aadaf; background: #fff; box-shadow: 0 5px 16px rgb(25 50 56 / 24%); }

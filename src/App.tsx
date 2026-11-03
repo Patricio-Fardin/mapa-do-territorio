@@ -301,26 +301,92 @@ function MapReference({
   mapRef,
   onLocationFound,
   onLocationError,
+  onUserDragStart,
 }: {
   mapRef: React.MutableRefObject<L.Map | null>
-  onLocationFound: () => void
+  onLocationFound: (event: L.LocationEvent) => void
   onLocationError: (code: number) => void
+  onUserDragStart: () => void
 }) {
   const map = useMap()
   useEffect(() => {
     mapRef.current = map
-    const locationFound = () => onLocationFound()
-    const locationError = (event: L.ErrorEvent) => onLocationError(event.code)
+    const locationPane = map.getPane('userLocationPane') ?? map.createPane('userLocationPane')
+    locationPane.style.zIndex = '650'
+    locationPane.style.pointerEvents = 'none'
+
+    const locationLayers = L.layerGroup().addTo(map)
+    let accuracyCircle: L.Circle | null = null
+    let locationMarker: L.Marker | null = null
+    const locationIcon = L.divIcon({
+      className: 'user-location-icon',
+      html: '<span class="user-location-pulse"></span><span class="user-location-dot"></span>',
+      iconSize: [24, 24],
+      iconAnchor: [12, 12],
+    })
+
+    const locationFound = (event: L.LocationEvent) => {
+      onLocationFound(event)
+      locationMarker?.getElement()?.classList.remove('user-location-icon--stale')
+      if (!accuracyCircle) {
+        accuracyCircle = L.circle(event.latlng, {
+          radius: Math.max(0, event.accuracy),
+          color: '#1a73e8',
+          weight: 1.5,
+          opacity: 0.8,
+          fillColor: '#4285f4',
+          fillOpacity: 0.16,
+          interactive: false,
+          pane: 'userLocationPane',
+        })
+        locationLayers.addLayer(accuracyCircle)
+      } else {
+        accuracyCircle.setLatLng(event.latlng)
+        accuracyCircle.setRadius(Math.max(0, event.accuracy))
+        accuracyCircle.setStyle({ opacity: 0.8, fillOpacity: 0.16 })
+      }
+
+      if (!locationMarker) {
+        locationMarker = L.marker(event.latlng, {
+          icon: locationIcon,
+          interactive: false,
+          keyboard: false,
+          pane: 'userLocationPane',
+        })
+        locationLayers.addLayer(locationMarker)
+      } else {
+        locationMarker.setLatLng(event.latlng)
+      }
+    }
+
+    const locationError = (event: L.ErrorEvent) => {
+      if (event.code === 1) {
+        locationLayers.clearLayers()
+        accuracyCircle = null
+        locationMarker = null
+      } else {
+        locationMarker?.getElement()?.classList.add('user-location-icon--stale')
+        accuracyCircle?.setStyle({ opacity: 0.4, fillOpacity: 0.08 })
+      }
+      onLocationError(event.code)
+    }
+
     map.on('locationfound', locationFound)
     map.on('locationerror', locationError)
+    map.on('dragstart', onUserDragStart)
     return () => {
+      map.stopLocate()
       map.off('locationfound', locationFound)
       map.off('locationerror', locationError)
+      map.off('dragstart', onUserDragStart)
+      locationLayers.removeFrom(map)
       mapRef.current = null
     }
-  }, [map, mapRef, onLocationFound, onLocationError])
+  }, [map, mapRef, onLocationFound, onLocationError, onUserDragStart])
   return null
 }
+
+type LocationMode = 'inactive' | 'following' | 'paused'
 
 type ResultadoAutorizacao = { autorizado: true } | { autorizado: false; mensagem: string }
 
@@ -812,8 +878,10 @@ function MapPage() {
   const lastSuccessfulLoadAtRef = useRef<number | null>(null)
   const layers = useRef(new Map<string, L.Layer[]>())
   const mapRef = useRef<L.Map | null>(null)
-  const previousLocationView = useRef<{ center: L.LatLng; zoom: number } | null>(null)
-  const [locating, setLocating] = useState(false)
+  const locationModeRef = useRef<LocationMode>('inactive')
+  const firstLocationFix = useRef(true)
+  const latestLocation = useRef<{ latlng: L.LatLng; accuracy: number } | null>(null)
+  const [locationMode, setLocationMode] = useState<LocationMode>('inactive')
   const [locationMessage, setLocationMessage] = useState('')
   const initialViewRestored = useRef(false)
   const selectedRef = useRef<string | null>(null)
@@ -1283,36 +1351,97 @@ function MapPage() {
     }
   }
 
-  const tratarLocalizacaoEncontrada = useCallback(() => {
-    previousLocationView.current = null
-    setLocating(false)
+  const tratarLocalizacaoEncontrada = useCallback((event: L.LocationEvent) => {
+    latestLocation.current = { latlng: event.latlng, accuracy: event.accuracy }
+    const map = mapRef.current
+    if (locationModeRef.current === 'paused') {
+      firstLocationFix.current = false
+      setLocationMessage('Acompanhamento pausado. Toque na mira para recentralizar.')
+      return
+    }
+    if (locationModeRef.current !== 'following' || !map) return
+
+    if (firstLocationFix.current) {
+      map.setView(event.latlng, Math.max(map.getZoom(), 16), { animate: true })
+      firstLocationFix.current = false
+    } else {
+      map.panTo(event.latlng, { animate: true, duration: 0.4 })
+    }
     setLocationMessage('')
   }, [])
 
   const tratarErroLocalizacao = useCallback((code: number) => {
-    const previousView = previousLocationView.current
-    if (previousView) mapRef.current?.setView(previousView.center, previousView.zoom, { animate: false })
-    previousLocationView.current = null
-    setLocating(false)
+    firstLocationFix.current = true
+    if (code === 1) {
+      latestLocation.current = null
+      mapRef.current?.stopLocate()
+      locationModeRef.current = 'inactive'
+      setLocationMode('inactive')
+    }
     setLocationMessage(code === 1
-      ? 'Permita o acesso à localização no navegador para centralizar o mapa.'
+      ? 'Acesso à localização negado. Verifique a permissão do navegador.'
       : code === 3
-        ? 'A localização demorou para responder. Tente novamente.'
-        : 'Não foi possível determinar sua localização. Verifique as permissões e tente novamente.')
+        ? 'O sinal de localização está demorando. A última posição permanece indicada.'
+        : 'Sinal de localização indisponível. A última posição permanece indicada.')
+  }, [])
+
+  const pausarAcompanhamentoManual = useCallback(() => {
+    if (locationModeRef.current !== 'following') return
+    locationModeRef.current = 'paused'
+    setLocationMode('paused')
+    setLocationMessage('Acompanhamento pausado. Toque na mira para recentralizar.')
   }, [])
 
   const centralizarNoMeuLocal = useCallback(() => {
     const map = mapRef.current
-    if (!map || locating) return
-    previousLocationView.current = { center: map.getCenter(), zoom: map.getZoom() }
-    setLocating(true)
+    if (!map) return
+
+    const ultimaPosicao = latestLocation.current
+    if (locationModeRef.current === 'following') {
+      if (ultimaPosicao) {
+        map.setView(ultimaPosicao.latlng, Math.max(map.getZoom(), 16), { animate: true })
+      } else {
+        setLocationMessage('Obtendo sua localização…')
+      }
+      return
+    }
+
+    if (locationModeRef.current === 'paused') {
+      locationModeRef.current = 'following'
+      setLocationMode('following')
+      if (ultimaPosicao) {
+        map.setView(ultimaPosicao.latlng, Math.max(map.getZoom(), 16), { animate: true })
+        setLocationMessage('')
+      } else {
+        setLocationMessage('Aguardando uma posição do GPS…')
+      }
+      return
+    }
+
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      setLocationMessage('Este navegador não disponibiliza a localização. O mapa continua funcionando normalmente.')
+      return
+    }
+
+    locationModeRef.current = 'following'
+    setLocationMode('following')
+    firstLocationFix.current = true
     setLocationMessage('Obtendo sua localização…')
     try {
-      map.locate({ setView: true, maxZoom: 16 })
+      map.locate({
+        watch: true,
+        setView: false,
+        enableHighAccuracy: true,
+        maximumAge: 3000,
+        timeout: 15000,
+      })
     } catch {
-      tratarErroLocalizacao(0)
+      map.stopLocate()
+      locationModeRef.current = 'inactive'
+      setLocationMode('inactive')
+      setLocationMessage('Não foi possível iniciar a localização. Tente novamente.')
     }
-  }, [locating, tratarErroLocalizacao])
+  }, [])
 
   useEffect(() => {
     if (!quadrasCarregadas || initialViewRestored.current || !mapRef.current) return
@@ -1608,6 +1737,7 @@ function MapPage() {
             mapRef={mapRef}
             onLocationFound={tratarLocalizacaoEncontrada}
             onLocationError={tratarErroLocalizacao}
+            onUserDragStart={pausarAcompanhamentoManual}
           />
           <AttributionControl position="bottomleft" />
           <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
@@ -1618,10 +1748,9 @@ function MapPage() {
             type="button"
             className="map-navigation-button map-location-button"
             onClick={centralizarNoMeuLocal}
-            disabled={locating}
-            aria-label="Centralizar no meu local"
-            title="Centralizar no meu local"
-            aria-busy={locating}
+            aria-label={locationMode === 'paused' ? 'Retomar acompanhamento da localização' : 'Centralizar no meu local'}
+            title={locationMode === 'paused' ? 'Retomar acompanhamento' : 'Centralizar no meu local'}
+            aria-pressed={locationMode === 'following'}
           >
             <LocateFixed size={24} strokeWidth={1.8} aria-hidden="true" focusable="false" />
           </button>
