@@ -182,7 +182,9 @@ export function criarIdentificacaoQuadra(
   cor: string,
   mostrarCodigo = true,
   dataAtualizacao?: string | null,
+  opcoes: { administrativo?: boolean } = {},
 ): L.Marker | null {
+  const administrativo = opcoes.administrativo === true
   const poligonos = extrairPoligonos(geometria)
   const poligono = poligonos.reduce<Poligono | null>((maior, atual) => (
     !maior || Math.abs(areaAproximada(atual)) > Math.abs(areaAproximada(maior)) ? atual : maior
@@ -220,7 +222,10 @@ export function criarIdentificacaoQuadra(
   const temData = mostrarCodigo && dataFormatada !== null
   const largura = Math.max(1, Math.min(mostrarCodigo ? (temData ? 170 : 150) : 120, raio * (mostrarCodigo ? (temData ? 1.65 : 1.35) : 1.6), (maxX - minX) * (mostrarCodigo ? .9 : .8)))
   const altura = Math.max(1, Math.min(mostrarCodigo ? (temData ? 60 : 46) : 30, raio * (mostrarCodigo ? (temData ? 1.65 : 1.35) : 1.2), (maxY - minY) * (mostrarCodigo ? .9 : .8)))
-  const compacto = largura < 48 || altura < (temData ? 38 : 26)
+  const compacto = !administrativo && (largura < 48 || altura < (temData ? 38 : 26))
+  if (administrativo && (mostrarCodigo
+    ? largura < 52 || altura < 22
+    : largura < 24 || altura < 12)) return null
   let fonte = Math.max(mostrarCodigo ? 1 : 6, Math.min(11, largura / (mostrarCodigo ? 8 : 7), altura / (temData ? 3.6 : compacto ? 1.5 : 2.8)))
   const statusPublico = STATUS_PUBLICOS[situacao]
   const paddingTexto = 4
@@ -248,6 +253,7 @@ export function criarIdentificacaoQuadra(
   const conteudo = document.createElement('span')
   conteudo.className = [
     'quadra-label',
+    administrativo ? 'quadra-label--admin' : '',
     mostrarCodigo && compacto ? 'quadra-label--compact' : '',
     temData ? 'quadra-label--com-data' : '',
     mostrarCodigo ? '' : 'quadra-label--status-only',
@@ -258,7 +264,9 @@ export function criarIdentificacaoQuadra(
   conteudo.style.setProperty('--quadra-label-fonte', `${fonte}px`)
   const situacaoElement = document.createElement('span')
   situacaoElement.className = 'quadra-label__situacao'
-  situacaoElement.textContent = mostrarCodigo ? situacao.toLocaleUpperCase('pt-BR') : textoPublico
+  situacaoElement.textContent = mostrarCodigo
+    ? (administrativo ? statusPublico.texto : situacao.toLocaleUpperCase('pt-BR'))
+    : textoPublico
   if (!mostrarCodigo && mostrarSimbolo) {
     const simboloElement = document.createElement('span')
     simboloElement.className = 'quadra-label__simbolo'

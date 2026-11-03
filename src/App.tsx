@@ -528,6 +528,7 @@ function AdminPage({ onBack }: { onBack: () => void }) {
   const [recoveryUserId, setRecoveryUserId] = useState<string | null>(null)
   const [showPassword, setShowPassword] = useState(false)
   const [message, setMessage] = useState('')
+  const [toastMessage, setToastMessage] = useState('')
   const [loadingMessage, setLoadingMessage] = useState<string | null>('Verificando sessão…')
   const [autorizado, setAutorizado] = useState(false)
   const submitting = useRef(false)
@@ -535,6 +536,12 @@ function AdminPage({ onBack }: { onBack: () => void }) {
   const recoveryCallbackRef = useRef<RecoveryCallback | null | undefined>(undefined)
   const recoveryCallbackResultRef = useRef<Promise<RecoveryResult> | null>(null)
   const configurationIncomplete = !client || !adminLoginEmail
+
+  useEffect(() => {
+    if (!toastMessage) return
+    const timeout = window.setTimeout(() => setToastMessage(''), 3500)
+    return () => window.clearTimeout(timeout)
+  }, [toastMessage])
 
   useEffect(() => {
     let active = true
@@ -576,7 +583,13 @@ function AdminPage({ onBack }: { onBack: () => void }) {
         const resultado = await validarUsuarioAdmin(client, data.session.user, adminLoginEmail)
         if (active) {
           setAutorizado(resultado.autorizado)
-          setMessage(mensagemAutorizacao(resultado))
+          if (resultado.autorizado) {
+            setMessage('')
+            setToastMessage(mensagemAutorizacao(resultado))
+          } else {
+            setToastMessage('')
+            setMessage(mensagemAutorizacao(resultado))
+          }
         }
       } catch {
         const resultado = await encerrarSessao(client, 'Não foi possível verificar a sessão.')
@@ -599,6 +612,7 @@ function AdminPage({ onBack }: { onBack: () => void }) {
         setAutorizado(false)
         setRecoveryUserId(null)
         setView('login')
+        setToastMessage('')
         setMessage('Sessão encerrada.')
       }
     })
@@ -608,6 +622,7 @@ function AdminPage({ onBack }: { onBack: () => void }) {
   const onAdminUnauthorized = useCallback(() => {
     setAutorizado(false)
     setRecoveryUserId(null)
+    setToastMessage('')
     setMessage('A sessão administrativa não é mais válida. Entre novamente.')
   }, [])
 
@@ -616,6 +631,7 @@ function AdminPage({ onBack }: { onBack: () => void }) {
     if (!client || configurationIncomplete || loadingMessage || submitting.current) return
     submitting.current = true
     setLoadingMessage('Validando acesso…')
+    setToastMessage('')
     setMessage('')
     try {
       if (username.trim().toLocaleLowerCase() !== adminUsername.toLocaleLowerCase()) {
@@ -637,7 +653,13 @@ function AdminPage({ onBack }: { onBack: () => void }) {
       }
       const resultado = await validarUsuarioAdmin(client, data.user, adminLoginEmail)
       setAutorizado(resultado.autorizado)
-      setMessage(mensagemAutorizacao(resultado))
+      if (resultado.autorizado) {
+        setMessage('')
+        setToastMessage(mensagemAutorizacao(resultado))
+      } else {
+        setToastMessage('')
+        setMessage(mensagemAutorizacao(resultado))
+      }
     } catch {
       const resultado = await encerrarSessao(client, 'Não foi possível concluir o acesso.')
       setMessage(resultado.mensagem)
@@ -819,6 +841,7 @@ function AdminPage({ onBack }: { onBack: () => void }) {
           ) : null}
         </>
       )}
+      {autorizado && toastMessage && <p className="admin-session-toast" role="status" aria-live="polite">{toastMessage}</p>}
       {message && <p role="alert">{message}</p>}
     </main>
   )

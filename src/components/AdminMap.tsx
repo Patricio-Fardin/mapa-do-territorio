@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { MapContainer, TileLayer, ZoomControl, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import type { Geometry, MultiPolygon, Polygon } from 'geojson'
@@ -197,8 +197,18 @@ function AdminDrawingMap({
       const labelLayers = labelsGroup.current
       if (!labelLayers) return
       labelLayers.clearLayers()
+      if (map.getZoom() < 16) return
       items.forEach((quadra) => {
-        const label = criarIdentificacaoQuadra(map, quadra.geometria, quadra.codigo, quadra.situacao, CORES[quadra.situacao], true, quadra.situacao === 'concluida' ? quadra.updatedAt : null)
+        const label = criarIdentificacaoQuadra(
+          map,
+          quadra.geometria,
+          quadra.codigo,
+          quadra.situacao,
+          CORES[quadra.situacao],
+          quadra.id === selectedId,
+          null,
+          { administrativo: true },
+        )
         if (label) labelLayers.addLayer(label)
       })
     }
@@ -378,6 +388,16 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
   const [loading, setLoading] = useState(true)
   const [baseMap, setBaseMap] = useState<AdminBasemap>(carregarPreferenciaBaseMap)
   const [toolsPanelOpen, setToolsPanelOpen] = useState(false)
+  const panelDragStartY = useRef<number | null>(null)
+  const iniciarArrastePainel = (event: ReactPointerEvent<HTMLDivElement>) => {
+    panelDragStartY.current = event.clientY
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+  const finalizarArrastePainel = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const inicio = panelDragStartY.current
+    panelDragStartY.current = null
+    if (inicio !== null && event.clientY - inicio > 80) setToolsPanelOpen(false)
+  }
   const operationLock = useRef(false)
   const selecionarBaseMap = useCallback((nextBaseMap: AdminBasemap) => {
     setBaseMap(nextBaseMap)
@@ -552,7 +572,9 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
       const previousFocus = deleteDialogReturnFocusRef.current
       deleteDialogReturnFocusRef.current = null
       if (previousFocus instanceof HTMLButtonElement && previousFocus.disabled) {
-        document.getElementById('admin-tools-toggle')?.focus()
+        const panelClose = document.querySelector<HTMLButtonElement>('#admin-tools-panel .admin-tools-panel-heading > button')
+        const focusTarget = panelClose ?? document.getElementById('admin-tools-toggle')
+        focusTarget?.focus()
       } else {
         previousFocus?.focus()
       }
@@ -613,18 +635,27 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
   }
 
   return (
-    <section className="admin-map">
+    <section className={toolsPanelOpen ? 'admin-map admin-map--tools-open' : 'admin-map'}>
       <button
         type="button"
         id="admin-tools-toggle"
         className="admin-tools-toggle"
+        aria-label={toolsPanelOpen ? 'Fechar ferramentas administrativas' : 'Abrir ferramentas administrativas'}
+        title={toolsPanelOpen ? 'Fechar ferramentas administrativas' : 'Abrir ferramentas administrativas'}
         aria-expanded={toolsPanelOpen}
         aria-controls="admin-tools-panel"
         onClick={() => setToolsPanelOpen((open) => !open)}
       >
-        {toolsPanelOpen ? 'Ocultar ferramentas' : 'Ferramentas administrativas'}
+        {toolsPanelOpen ? '×' : '⚙'}
       </button>
       {toolsPanelOpen && <div id="admin-tools-panel" className="admin-tools-panel" aria-label="Ferramentas administrativas">
+        <div
+          className="admin-tools-panel-handle"
+          aria-hidden="true"
+          onPointerDown={iniciarArrastePainel}
+          onPointerUp={finalizarArrastePainel}
+          onPointerCancel={() => { panelDragStartY.current = null }}
+        ><span /></div>
         <div className="admin-tools-panel-heading">
           <strong>Ferramentas administrativas</strong>
           <button type="button" onClick={() => setToolsPanelOpen(false)} aria-label="Fechar ferramentas administrativas">×</button>

@@ -570,3 +570,161 @@ button:hover { border-color: #287f73; }
     width: 100%;
   }
 }
+
+
+/* Identificações administrativas: texto em uma linha e limitado à área calculada. */
+.quadra-label--admin .quadra-label__codigo,
+.quadra-label--admin .quadra-label__situacao,
+.quadra-label--admin .quadra-label__data {
+  display: block;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  overflow-wrap: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  word-break: normal;
+}
+
+.quadra-label--admin .quadra-label__data {
+  font-size: calc(var(--quadra-label-fonte) * .72);
+}
+
+/* Controles flutuantes da área administrativa. */
+.admin-tools-toggle {
+  top: auto;
+  right: max(1rem, env(safe-area-inset-right));
+  bottom: max(1rem, env(safe-area-inset-bottom));
+  left: auto;
+  z-index: 1200;
+  display: grid;
+  width: 56px;
+  height: 56px;
+  min-height: 56px;
+  padding: 0;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 1.45rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.admin-page--workspace .admin-map-card .leaflet-bottom.leaflet-right {
+  bottom: 4.8rem;
+}
+
+.admin-tools-panel-handle {
+  display: none;
+}
+
+.admin-page--workspace > .admin-session-toast {
+  position: absolute;
+  z-index: 1300;
+  top: calc(max(.6rem, env(safe-area-inset-top)) + 4.2rem);
+  left: 50%;
+  width: min(420px, calc(100% - 1.5rem));
+  margin: 0;
+  padding: .65rem .9rem;
+  transform: translateX(-50%);
+  border: 1px solid #b9dcc5;
+  border-radius: .75rem;
+  background: rgb(235 248 239 / 96%);
+  color: #205b35;
+  box-shadow: 0 4px 16px rgb(25 50 56 / 16%);
+  font-size: .88rem;
+  font-weight: 700;
+  text-align: center;
+  pointer-events: none;
+}
+
+@media (max-width: 640px) {
+  .admin-tools-panel {
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    max-width: none;
+    max-height: min(74dvh, 680px);
+    padding:
+      .35rem
+      max(.85rem, env(safe-area-inset-right))
+      calc(.9rem + env(safe-area-inset-bottom))
+      max(.85rem, env(safe-area-inset-left));
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 1.15rem 1.15rem 0 0;
+    animation: admin-tools-sheet-enter .22s ease-out;
+  }
+
+  .admin-tools-panel-handle {
+    display: grid;
+    min-height: 26px;
+    place-items: center;
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+  }
+
+  .admin-tools-panel-handle:active {
+    cursor: grabbing;
+  }
+
+  .admin-tools-panel-handle span {
+    display: block;
+    width: 42px;
+    height: 5px;
+    border-radius: 999px;
+    background: #9aadb1;
+  }
+
+  .admin-tools-panel-heading {
+    min-height: 40px;
+  }
+
+  .admin-tools-panel-heading > button {
+    width: 42px;
+    min-height: 42px;
+  }
+
+  .admin-tools-toggle {
+    top: auto;
+    right: max(.85rem, env(safe-area-inset-right));
+    bottom: max(.85rem, env(safe-area-inset-bottom));
+    left: auto;
+    width: 56px;
+    height: 56px;
+    min-height: 56px;
+    border-radius: 50%;
+    font-size: 1.45rem;
+  }
+
+  .admin-tools-toggle[aria-expanded="true"] {
+    display: none;
+  }
+
+  .admin-page--workspace .admin-map-card .leaflet-bottom.leaflet-right {
+    bottom: 4.8rem;
+  }
+
+  .admin-page--workspace > [role="alert"] {
+    top: calc(max(.5rem, env(safe-area-inset-top)) + 4.2rem);
+  }
+
+  .admin-page--workspace > .admin-session-toast {
+    top: calc(max(.5rem, env(safe-area-inset-top)) + 4.2rem);
+  }
+}
+
+@keyframes admin-tools-sheet-enter {
+  from { opacity: .7; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-tools-panel {
+    animation: none;
+  }
+}
