@@ -190,7 +190,11 @@ function AdminDrawingMap({
   }, [map])
 
   useEffect(() => {
-    const closeContextMenu = () => setContextMenu(null)
+    const closeContextMenu = (event: L.LeafletMouseEvent) => {
+      // Cliques originados em polígonos não devem fechar o menu que o próprio polígono abriu.
+      if (event.sourceTarget !== map) return
+      setContextMenu(null)
+    }
     map.on('click', closeContextMenu)
     return () => {
       map.off('click', closeContextMenu)
@@ -219,6 +223,16 @@ function AdminDrawingMap({
             aplicarEstilo(part, quadra.situacao)
             idsByLayer.current.set(part, quadra.id)
             part.on('click', (event: L.LeafletMouseEvent) => {
+              L.DomEvent.stopPropagation(event.originalEvent)
+              if (quadra.id !== selectedId) {
+                setContextMenu(null)
+                callbacks.current.onSelect(quadra.id)
+                return
+              }
+              setContextMenu({ quadraId: quadra.id, latlng: event.latlng })
+            })
+            part.on('contextmenu', (event: L.LeafletMouseEvent) => {
+              L.DomEvent.preventDefault(event.originalEvent)
               L.DomEvent.stopPropagation(event.originalEvent)
               if (quadra.id !== selectedId) {
                 setContextMenu(null)

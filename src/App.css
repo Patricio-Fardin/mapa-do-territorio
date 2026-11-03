@@ -821,6 +821,11 @@ button:hover { border-color: #287f73; }
   }
 }
 
+/* A edição de vértices é iniciada pelo menu contextual da própria quadra. */
+.admin-page--workspace .leaflet-draw-edit-edit {
+  display: none !important;
+}
+
 /* Menu contextual exibido sobre a quadra selecionada. */
 .admin-page--workspace .admin-quadra-context-popup .leaflet-popup-content-wrapper {
   border: 1px solid #d9e3e4;
