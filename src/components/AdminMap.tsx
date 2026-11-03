@@ -15,6 +15,7 @@ type Quadra = { id: string; codigo: string; situacao: Situacao; updatedAt: strin
 type GeometriaEditada = { id: string; geometria: Geometry }
 type RpcQuadra = { id?: string; codigo?: string; geometria?: Geometry }
 type Props = { adminEmail: string; onUnauthorized: () => void }
+type AdminFeedback = { text: string; kind: 'success' | 'error' }
 
 const CORES: Record<Situacao, string> = { pendente: '#78858a', concluida: '#27ae60', refazer: '#e67e22' }
 const NOMES: Record<Situacao, string> = { pendente: 'Pendente', concluida: 'Concluída', refazer: 'Refazer' }
@@ -274,6 +275,15 @@ function AdminDrawingMap({
     })
     map.addControl(control)
     let editSaveRequested = false
+    const atualizarBotaoSalvarEdicao = (alteracaoPendente: boolean) => {
+      const saveButton = map.getContainer().querySelector<HTMLAnchorElement>('.leaflet-draw-actions a')
+      if (!saveButton) return
+      saveButton.classList.add('admin-draw-save-action')
+      saveButton.textContent = 'Salvar Alterações do Desenho'
+      saveButton.title = 'Salvar Alterações do Desenho'
+      saveButton.setAttribute('aria-label', 'Salvar Alterações do Desenho')
+      saveButton.classList.toggle('is-pending', alteracaoPendente)
+    }
 
     const created = (event: L.LeafletEvent) => {
       if (busyRef.current) return
@@ -332,9 +342,12 @@ function AdminDrawingMap({
     const drawingCancelled = () => callbacks.current.onCancel()
     const editingStarted = () => {
       editSaveRequested = false
+      atualizarBotaoSalvarEdicao(false)
       interactionStarted()
     }
+    const editingVertexChanged = () => atualizarBotaoSalvarEdicao(true)
     const editingStopped = () => {
+      atualizarBotaoSalvarEdicao(false)
       pendingLayerSync.current = true
       interactionStopped()
       if (!editSaveRequested) callbacks.current.onCancel()
@@ -346,6 +359,7 @@ function AdminDrawingMap({
     map.on(L.Draw.Event.DRAWSTOP, drawingStopped)
     map.on('draw:canceled', drawingCancelled)
     map.on(L.Draw.Event.EDITSTART, editingStarted)
+    map.on(L.Draw.Event.EDITVERTEX, editingVertexChanged)
     map.on(L.Draw.Event.EDITSTOP, editingStopped)
     return () => {
       map.off(L.Draw.Event.CREATED, created)
@@ -354,6 +368,7 @@ function AdminDrawingMap({
       map.off(L.Draw.Event.DRAWSTOP, drawingStopped)
       map.off('draw:canceled', drawingCancelled)
       map.off(L.Draw.Event.EDITSTART, editingStarted)
+      map.off(L.Draw.Event.EDITVERTEX, editingVertexChanged)
       map.off(L.Draw.Event.EDITSTOP, editingStopped)
       if (doubleClickZoomWasEnabled) map.doubleClickZoom.enable()
       map.removeControl(control)
@@ -383,11 +398,32 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
   const [deleteError, setDeleteError] = useState('')
   const deleteDialogRef = useRef<HTMLDialogElement | null>(null)
   const deleteDialogReturnFocusRef = useRef<HTMLElement | null>(null)
-  const [message, setMessage] = useState('')
+  const [toolsPanelOpen, setToolsPanelOpen] = useState(false)
+  const [feedback, setFeedback] = useState<AdminFeedback | null>(null)
+  const feedbackTimeoutRef = useRef<number | null>(null)
+  const limparFeedback = useCallback(() => {
+    if (feedbackTimeoutRef.current !== null) window.clearTimeout(feedbackTimeoutRef.current)
+    feedbackTimeoutRef.current = null
+    setFeedback(null)
+  }, [])
+  const mostrarFeedback = useCallback((text: string, kind: AdminFeedback['kind'] = 'error') => {
+    if (feedbackTimeoutRef.current !== null) window.clearTimeout(feedbackTimeoutRef.current)
+    feedbackTimeoutRef.current = null
+    setToolsPanelOpen(true)
+    setFeedback({ text, kind })
+    if (kind === 'success') {
+      feedbackTimeoutRef.current = window.setTimeout(() => {
+        setFeedback((current) => current?.text === text ? null : current)
+        feedbackTimeoutRef.current = null
+      }, 3500)
+    }
+  }, [setToolsPanelOpen])
+  useEffect(() => () => {
+    if (feedbackTimeoutRef.current !== null) window.clearTimeout(feedbackTimeoutRef.current)
+  }, [])
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(true)
   const [baseMap, setBaseMap] = useState<AdminBasemap>(carregarPreferenciaBaseMap)
-  const [toolsPanelOpen, setToolsPanelOpen] = useState(false)
   const panelDragStartY = useRef<number | null>(null)
   const iniciarArrastePainel = (event: ReactPointerEvent<HTMLDivElement>) => {
     panelDragStartY.current = event.clientY
@@ -436,30 +472,30 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
     let active = true
     void carregar()
       .catch((error: unknown) => {
-        if (active) setMessage(mensagemErroLeitura(error))
+        if (active) mostrarFeedback(mensagemErroLeitura(error))
       })
     return () => {
       active = false
       loadVersion.current += 1
     }
-  }, [carregar])
+  }, [carregar, mostrarFeedback])
 
   useEffect(() => {
     const client = supabase
     if (!client) return
     const channel = client
       .channel('admin-quadras')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'quadras' }, () => { void carregar().catch((error: unknown) => setMessage(mensagemErroLeitura(error))) })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'situacoes_quadras' }, () => { void carregar().catch((error: unknown) => setMessage(mensagemErroLeitura(error))) })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'quadras' }, () => { void carregar().catch((error: unknown) => mostrarFeedback(mensagemErroLeitura(error))) })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'situacoes_quadras' }, () => { void carregar().catch((error: unknown) => mostrarFeedback(mensagemErroLeitura(error))) })
       .subscribe()
     const refreshTimer = window.setInterval(() => {
-      void carregar().catch((error: unknown) => setMessage(mensagemErroLeitura(error)))
+      void carregar().catch((error: unknown) => mostrarFeedback(mensagemErroLeitura(error)))
     }, 30_000)
     return () => {
       window.clearInterval(refreshTimer)
       void client.removeChannel(channel)
     }
-  }, [carregar])
+  }, [carregar, mostrarFeedback])
 
   const executarAdmin = useCallback(async (
     operation: () => Promise<void>,
@@ -468,7 +504,8 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
     if (operationLock.current) return
     operationLock.current = true
     setBusy(true)
-    setMessage('')
+    setToolsPanelOpen(true)
+    limparFeedback()
     try {
       if (!await confirmarSessaoAdmin(adminEmail)) {
         onUnauthorized()
@@ -476,7 +513,7 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
       }
       await operation()
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'A operação não foi concluída. Tente novamente.')
+      let failureMessage = error instanceof Error ? error.message : 'A operação não foi concluída. Tente novamente.'
       try {
         await carregar()
       } catch (refreshError: unknown) {
@@ -485,13 +522,14 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
           setQuadras([])
           setSelectedId(null)
         }
-        setMessage((current) => `${current} ${mensagemErroLeitura(refreshError)}${options.preserveDataOnRefreshFailure ? ' Os dados exibidos foram mantidos.' : ' A lista foi limpa até uma nova leitura bem-sucedida.'}`)
+        failureMessage += ` ${mensagemErroLeitura(refreshError)}${options.preserveDataOnRefreshFailure ? ' Os dados exibidos foram mantidos.' : ' A lista foi limpa até uma nova leitura bem-sucedida.'}`
       }
+      mostrarFeedback(failureMessage)
     } finally {
       operationLock.current = false
       setBusy(false)
     }
-  }, [adminEmail, carregar, onUnauthorized])
+  }, [adminEmail, carregar, limparFeedback, mostrarFeedback, onUnauthorized, setToolsPanelOpen])
 
   const criar = useCallback((geometria: Geometry) => {
     void executarAdmin(async () => {
@@ -509,19 +547,19 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
       const codigo = `AC-${(maxCode + 1n).toString().padStart(3, '0')}`
       const { data, error } = await supabase.rpc('admin_criar_quadra', { p_codigo: codigo, p_geometria: geometria })
       if (error) {
-        if (error.code === '23505') throw new Error(`O código ${codigo} foi usado por outra operação. Atualize e tente novamente.`)
+        if (error.code === '23505') throw new Error(`O código ${codigo} foi usado por outra operação. A lista será consultada novamente; tente outra vez.`)
         const safeCode = /^[0-9A-Z]{5}$/.test(error.code ?? '') ? ` Código: ${error.code}.` : ''
         throw new Error(`O Supabase não confirmou a criação da quadra. A operação não foi apresentada como salva.${safeCode}`)
       }
       const created = data as RpcQuadra | null
       if (!created?.id || created.codigo !== codigo) {
-        throw new Error('A resposta da criação não confirmou a quadra. Atualize a lista antes de tentar novamente.')
+        throw new Error('A resposta da criação não confirmou a quadra. Confira a lista sincronizada antes de tentar novamente.')
       }
       const createdId = created.id
       try {
         await carregar()
         setSelectedId(createdId)
-        setMessage(`Quadra ${codigo} criada e carregada do Supabase.`)
+        mostrarFeedback(`Quadra ${codigo} criada e carregada do Supabase.`, 'success')
       } catch {
         setQuadras((current) => [...current, {
           id: createdId,
@@ -532,10 +570,10 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
           ativa: true,
         }])
         setSelectedId(created.id)
-        setMessage(`Quadra ${codigo} foi criada, mas a lista não pôde ser recarregada.`)
+        mostrarFeedback(`Quadra ${codigo} foi criada, mas a lista não pôde ser recarregada.`)
       }
     })
-  }, [carregar, executarAdmin])
+  }, [carregar, executarAdmin, mostrarFeedback])
 
   const salvarGeometrias = useCallback((geometries: GeometriaEditada[]) => {
     void executarAdmin(async () => {
@@ -556,9 +594,9 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
         savedCount += 1
       }
       await carregar()
-      setMessage(geometries.length === 1 ? 'Geometria salva e recarregada do Supabase.' : 'Geometrias salvas e recarregadas do Supabase.')
+      mostrarFeedback(geometries.length === 1 ? 'Geometria salva e recarregada do Supabase.' : 'Geometrias salvas e recarregadas do Supabase.', 'success')
     })
-  }, [carregar, executarAdmin])
+  }, [carregar, executarAdmin, mostrarFeedback])
 
   useEffect(() => {
     const dialog = deleteDialogRef.current
@@ -600,15 +638,15 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
         data = result.data
         error = result.error
       } catch {
-        const failure = 'Não foi possível remover a quadra do mapa público. Nenhuma alteração foi confirmada. Atualize os dados e tente novamente.'
+        const failure = 'Não foi possível remover a quadra do mapa público. Nenhuma alteração foi confirmada. Tente novamente em instantes.'
         setDeleteError(failure)
         throw new Error(failure)
       }
 
       if (error || data !== true) {
         const failure = error?.code === '23503'
-          ? 'Não foi possível remover a quadra porque há registros vinculados. Nenhuma alteração foi realizada. Atualize os dados e tente novamente.'
-          : 'Não foi possível remover a quadra devido a uma falha no banco. Nenhuma alteração foi confirmada. Atualize os dados e tente novamente.'
+          ? 'Não foi possível remover a quadra porque há registros vinculados. Nenhuma alteração foi realizada.'
+          : 'Não foi possível remover a quadra devido a uma falha no banco. Nenhuma alteração foi confirmada. Tente novamente em instantes.'
         setDeleteError(failure)
         throw new Error(failure)
       }
@@ -620,19 +658,12 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
 
       try {
         await carregar()
-        setMessage(`Quadra ${target.codigo} removida do mapa público. O histórico foi preservado.`)
+        mostrarFeedback(`Quadra ${target.codigo} removida do mapa público. O histórico foi preservado.`, 'success')
       } catch {
-        setMessage(`Quadra ${target.codigo} removida do mapa público. O histórico foi preservado. A lista não pôde ser atualizada; use “Atualizar dados”.`)
+        mostrarFeedback(`Quadra ${target.codigo} removida do mapa público. O histórico foi preservado. A lista será sincronizada automaticamente.`)
       }
     }, { preserveDataOnRefreshFailure: true })
-  }, [carregar, deleteTarget, executarAdmin])
-
-  const retryLoad = () => {
-    setLoading(true)
-    setMessage('')
-    void carregar()
-      .catch((error: unknown) => setMessage(mensagemErroLeitura(error)))
-  }
+  }, [carregar, deleteTarget, executarAdmin, mostrarFeedback])
 
   return (
     <section className={toolsPanelOpen ? 'admin-map admin-map--tools-open' : 'admin-map'}>
@@ -660,6 +691,8 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
           <strong>Ferramentas administrativas</strong>
           <button type="button" onClick={() => setToolsPanelOpen(false)} aria-label="Fechar ferramentas administrativas">×</button>
         </div>
+        {(loading || busy) && <p className="admin-inline-feedback admin-inline-feedback--status" role="status">{loading ? 'Carregando quadras…' : 'Processando operação administrativa…'}</p>}
+        {feedback && <p className={`admin-inline-feedback admin-inline-feedback--${feedback.kind}`} role={feedback.kind === 'error' ? 'alert' : 'status'} aria-live={feedback.kind === 'error' ? 'assertive' : 'polite'}>{feedback.text}</p>}
         <div className="admin-map-toolbar">
           <div className="status-panel admin-status">
             <div><strong>{counts.total}</strong><span>Ativas</span></div>
@@ -678,7 +711,7 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
           <div className="admin-map-actions">
             <details className="admin-map-help">
               <summary>Ajuda para desenhar e editar</summary>
-              <p>Para criar uma quadra, use a ferramenta de polígono e finalize no primeiro ponto ou com duplo clique no último. Para editar, selecione a quadra e ative a ferramenta de edição; confirme no botão de salvar ou cancele no X.</p>
+              <p>Para criar uma quadra, use a ferramenta de polígono e finalize no primeiro ponto ou com duplo clique no último; a criação é salva automaticamente. Para editar, selecione a quadra e ative a ferramenta de edição. Após mover um vértice, use “Salvar Alterações do Desenho” para confirmar ou “Cancelar” para descartar.</p>
             </details>
             <button
               type="button"
@@ -687,13 +720,12 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
                 if (!selected) return
                 setDeleteTargetId(selected.id)
                 setDeleteError('')
-                setMessage('')
+                limparFeedback()
               }}
               disabled={!selected || busy || loading}
             >
               Excluir Quadra
             </button>
-            <button type="button" className="admin-refresh-action" onClick={retryLoad} disabled={busy || loading}>Atualizar dados</button>
           </div>
         </div>
 
@@ -757,8 +789,6 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
           </button>
         </div>
       </dialog>
-      {(loading || busy) && <p className="admin-map-feedback admin-map-feedback--status" role="status">{loading ? 'Carregando quadras…' : 'Processando operação administrativa…'}</p>}
-      {message && <p className="admin-map-feedback admin-map-feedback--message" role="alert">{message}</p>}
       <div className="map-card admin-map-card">
         <MapContainer center={CENTRO} zoom={14} zoomControl={false} className="map">
           <ZoomControl position="bottomright" />
@@ -773,7 +803,7 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
             onSelect={setSelectedId}
             onCreate={criar}
             onGeometryEdit={salvarGeometrias}
-            onCancel={() => setMessage('Operação cancelada. Nenhuma alteração foi salva.')}
+            onCancel={() => mostrarFeedback('Operação cancelada. Nenhuma alteração foi salva.', 'success')}
           />
         </MapContainer>
       </div>

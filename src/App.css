@@ -728,3 +728,94 @@ button:hover { border-color: #287f73; }
     animation: none;
   }
 }
+
+
+/* Feedback administrativo dentro da gaveta, sem sobreposição ao mapa. */
+.admin-tools-panel {
+  z-index: 1400;
+}
+
+.admin-inline-feedback {
+  position: static;
+  width: 100%;
+  max-height: none;
+  margin: 0;
+  padding: .6rem .75rem;
+  overflow: visible;
+  transform: none;
+  border: 1px solid #d9e3e4;
+  border-radius: .6rem;
+  background: #f5f8f8;
+  color: #24474d;
+  box-shadow: none;
+  font-size: .82rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.admin-inline-feedback--status {
+  border-color: #d9e3e4;
+  background: #f5f8f8;
+}
+
+.admin-inline-feedback--success {
+  border-color: #b9dcc5;
+  background: #eff8f1;
+  color: #205b35;
+}
+
+.admin-inline-feedback--error {
+  border-color: #e8c4c1;
+  background: #fff4f2;
+  color: #8b2525;
+}
+
+/* A confirmação nativa do Leaflet Draw só aparece após mover um vértice. */
+.admin-page--workspace .leaflet-draw-actions a.admin-draw-save-action {
+  display: none !important;
+  width: min(190px, 52vw);
+  height: auto;
+  min-height: 34px;
+  padding: .45rem .55rem;
+  line-height: 1.2;
+  text-align: center;
+  white-space: normal;
+}
+
+.admin-page--workspace .leaflet-draw-actions a.admin-draw-save-action.is-pending {
+  display: block !important;
+}
+
+.admin-tools-toggle {
+  z-index: 1500;
+}
+
+/* O aviso de sessão fica fora da área dos controles Leaflet no canto superior direito. */
+.admin-page--workspace > .admin-session-toast {
+  z-index: 1300;
+  right: auto;
+  left: max(.6rem, env(safe-area-inset-left));
+  width: min(240px, calc(100vw - 5rem));
+  transform: none;
+  text-align: left;
+}
+
+@media (max-width: 640px) {
+  .admin-tools-panel {
+    z-index: 1400;
+  }
+
+  .admin-tools-toggle {
+    z-index: 1500;
+  }
+
+  .admin-inline-feedback {
+    font-size: .8rem;
+  }
+
+  .admin-page--workspace > .admin-session-toast {
+    top: calc(max(.5rem, env(safe-area-inset-top)) + 4.2rem);
+    left: max(.5rem, env(safe-area-inset-left));
+    width: min(240px, calc(100vw - 5rem));
+  }
+}
