@@ -155,6 +155,30 @@ button:hover { border-color: #287f73; }
 .status-button--refazer { background: #b95700; }
 .status-feedback { margin: 0; color: #287f73; font-size: .9rem; font-weight: 700; }
 .status-feedback--error, .status-feedback--warning { color: #856404; }
+.status-toast {
+  position: fixed;
+  z-index: 2000;
+  top: calc(4.5rem + env(safe-area-inset-top));
+  left: 50%;
+  width: max-content;
+  max-width: calc(100vw - 2rem);
+  padding: .7rem 1rem;
+  transform: translateX(-50%);
+  border: 1px solid #f0c5c0;
+  border-radius: .65rem;
+  background: #fff8f7;
+  color: #9f2d23;
+  box-shadow: 0 4px 16px #19323826;
+  font-size: .9rem;
+  font-weight: 700;
+  text-align: center;
+  pointer-events: none;
+  animation: status-toast-enter .16s ease-out;
+}
+@keyframes status-toast-enter {
+  from { opacity: 0; transform: translate(-50%, -6px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
 .reconcile-save-button { justify-self: start; min-height: 44px; border-color: #9c7b20; color: #695313; font-weight: 700; }
 @media (min-width: 641px) {
   .sheet { width: min(420px, calc(100vw - 2rem)); right: 1.25rem; bottom: 1.25rem; }
