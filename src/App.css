@@ -437,6 +437,14 @@ button:hover { border-color: #287f73; }
 
 .admin-page--workspace .admin-map-feedback--message {
   bottom: max(1rem, env(safe-area-inset-bottom));
+  pointer-events: none;
+}
+
+.admin-page--workspace .admin-map-feedback--success {
+  border-color: #b9dcc5;
+  background: rgb(239 248 241 / 97%);
+  color: #205b35;
+  text-align: center;
 }
 
 /* Ajustes compactos para telas estreitas. */

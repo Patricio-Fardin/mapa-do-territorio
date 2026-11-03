@@ -438,7 +438,17 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
   const deleteDialogReturnFocusRef = useRef<HTMLElement | null>(null)
   const [toolsPanelOpen, setToolsPanelOpen] = useState(false)
   const [feedback, setFeedback] = useState<AdminFeedback | null>(null)
+  const [creationToast, setCreationToast] = useState('')
   const feedbackTimeoutRef = useRef<number | null>(null)
+  const creationToastTimeoutRef = useRef<number | null>(null)
+  const mostrarToastCriacao = useCallback((text: string) => {
+    if (creationToastTimeoutRef.current !== null) window.clearTimeout(creationToastTimeoutRef.current)
+    setCreationToast(text)
+    creationToastTimeoutRef.current = window.setTimeout(() => {
+      setCreationToast('')
+      creationToastTimeoutRef.current = null
+    }, 3000)
+  }, [])
   const limparFeedback = useCallback(() => {
     if (feedbackTimeoutRef.current !== null) window.clearTimeout(feedbackTimeoutRef.current)
     feedbackTimeoutRef.current = null
@@ -458,6 +468,7 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
   }, [setToolsPanelOpen])
   useEffect(() => () => {
     if (feedbackTimeoutRef.current !== null) window.clearTimeout(feedbackTimeoutRef.current)
+    if (creationToastTimeoutRef.current !== null) window.clearTimeout(creationToastTimeoutRef.current)
   }, [])
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -541,12 +552,12 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
 
   const executarAdmin = useCallback(async (
     operation: () => Promise<void>,
-    options: { preserveDataOnRefreshFailure?: boolean } = {},
+    options: { preserveDataOnRefreshFailure?: boolean; openToolsPanel?: boolean } = {},
   ) => {
     if (operationLock.current) return
     operationLock.current = true
     setBusy(true)
-    setToolsPanelOpen(true)
+    if (options.openToolsPanel !== false) setToolsPanelOpen(true)
     limparFeedback()
     try {
       if (!await confirmarSessaoAdmin(adminEmail)) {
@@ -601,7 +612,7 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
       try {
         await carregar()
         setSelectedId(createdId)
-        mostrarFeedback(`Quadra ${codigo} criada e carregada do Supabase.`, 'success')
+        mostrarToastCriacao(`Quadra ${codigo} criada com sucesso!`)
       } catch {
         setQuadras((current) => [...current, {
           id: createdId,
@@ -614,8 +625,8 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
         setSelectedId(created.id)
         mostrarFeedback(`Quadra ${codigo} foi criada, mas a lista não pôde ser recarregada.`)
       }
-    })
-  }, [carregar, executarAdmin, mostrarFeedback])
+    }, { openToolsPanel: false })
+  }, [carregar, executarAdmin, mostrarFeedback, mostrarToastCriacao])
 
   const salvarGeometrias = useCallback((geometries: GeometriaEditada[]) => {
     void executarAdmin(async () => {
@@ -709,6 +720,11 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
 
   return (
     <section className={toolsPanelOpen ? 'admin-map admin-map--tools-open' : 'admin-map'}>
+      {creationToast && (
+        <p className="admin-map-feedback admin-map-feedback--message admin-map-feedback--success" role="status" aria-live="polite">
+          {creationToast}
+        </p>
+      )}
       <button
         type="button"
         id="admin-tools-toggle"
