@@ -447,6 +447,14 @@ button:hover { border-color: #287f73; }
   text-align: center;
 }
 
+.admin-page--workspace .admin-map-feedback--error {
+  border-color: #e8c4c1;
+  background: rgb(255 244 242 / 97%);
+  color: #8b2525;
+  text-align: center;
+  pointer-events: auto;
+}
+
 /* Ajustes compactos para telas estreitas. */
 @media (max-width: 640px) {
   .admin-workspace-header {

@@ -437,38 +437,26 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
   const deleteDialogRef = useRef<HTMLDialogElement | null>(null)
   const deleteDialogReturnFocusRef = useRef<HTMLElement | null>(null)
   const [toolsPanelOpen, setToolsPanelOpen] = useState(false)
-  const [feedback, setFeedback] = useState<AdminFeedback | null>(null)
-  const [creationToast, setCreationToast] = useState('')
-  const feedbackTimeoutRef = useRef<number | null>(null)
-  const creationToastTimeoutRef = useRef<number | null>(null)
-  const mostrarToastCriacao = useCallback((text: string) => {
-    if (creationToastTimeoutRef.current !== null) window.clearTimeout(creationToastTimeoutRef.current)
-    setCreationToast(text)
-    creationToastTimeoutRef.current = window.setTimeout(() => {
-      setCreationToast('')
-      creationToastTimeoutRef.current = null
-    }, 3000)
+  const [mapToast, setMapToast] = useState<AdminFeedback | null>(null)
+  const mapToastTimeoutRef = useRef<number | null>(null)
+  const mostrarToast = useCallback((text: string, kind: AdminFeedback['kind'] = 'success') => {
+    if (mapToastTimeoutRef.current !== null) window.clearTimeout(mapToastTimeoutRef.current)
+    setMapToast({ text, kind })
+    mapToastTimeoutRef.current = window.setTimeout(() => {
+      setMapToast((current) => current?.text === text ? null : current)
+      mapToastTimeoutRef.current = null
+    }, kind === 'success' ? 3000 : 7000)
   }, [])
   const limparFeedback = useCallback(() => {
-    if (feedbackTimeoutRef.current !== null) window.clearTimeout(feedbackTimeoutRef.current)
-    feedbackTimeoutRef.current = null
-    setFeedback(null)
+    if (mapToastTimeoutRef.current !== null) window.clearTimeout(mapToastTimeoutRef.current)
+    mapToastTimeoutRef.current = null
+    setMapToast(null)
   }, [])
   const mostrarFeedback = useCallback((text: string, kind: AdminFeedback['kind'] = 'error') => {
-    if (feedbackTimeoutRef.current !== null) window.clearTimeout(feedbackTimeoutRef.current)
-    feedbackTimeoutRef.current = null
-    setToolsPanelOpen(true)
-    setFeedback({ text, kind })
-    if (kind === 'success') {
-      feedbackTimeoutRef.current = window.setTimeout(() => {
-        setFeedback((current) => current?.text === text ? null : current)
-        feedbackTimeoutRef.current = null
-      }, 3500)
-    }
-  }, [setToolsPanelOpen])
+    mostrarToast(text, kind)
+  }, [mostrarToast])
   useEffect(() => () => {
-    if (feedbackTimeoutRef.current !== null) window.clearTimeout(feedbackTimeoutRef.current)
-    if (creationToastTimeoutRef.current !== null) window.clearTimeout(creationToastTimeoutRef.current)
+    if (mapToastTimeoutRef.current !== null) window.clearTimeout(mapToastTimeoutRef.current)
   }, [])
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -612,7 +600,7 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
       try {
         await carregar()
         setSelectedId(createdId)
-        mostrarToastCriacao(`Quadra ${codigo} criada com sucesso!`)
+        mostrarToast(`Quadra ${codigo} criada com sucesso!`)
       } catch {
         setQuadras((current) => [...current, {
           id: createdId,
@@ -626,7 +614,7 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
         mostrarFeedback(`Quadra ${codigo} foi criada, mas a lista não pôde ser recarregada.`)
       }
     }, { openToolsPanel: false })
-  }, [carregar, executarAdmin, mostrarFeedback, mostrarToastCriacao])
+  }, [carregar, executarAdmin, mostrarFeedback, mostrarToast])
 
   const salvarGeometrias = useCallback((geometries: GeometriaEditada[]) => {
     void executarAdmin(async () => {
@@ -647,9 +635,9 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
         savedCount += 1
       }
       await carregar()
-      mostrarFeedback(geometries.length === 1 ? 'Geometria salva e recarregada do Supabase.' : 'Geometrias salvas e recarregadas do Supabase.', 'success')
-    })
-  }, [carregar, executarAdmin, mostrarFeedback])
+      mostrarToast(geometries.length === 1 ? 'Geometria salva e recarregada do Supabase.' : 'Geometrias salvas e recarregadas do Supabase.')
+    }, { openToolsPanel: false })
+  }, [carregar, executarAdmin, mostrarToast])
 
   useEffect(() => {
     const dialog = deleteDialogRef.current
@@ -711,18 +699,18 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
 
       try {
         await carregar()
-        mostrarToastCriacao(`Quadra ${target.codigo} removida do mapa público. O histórico foi preservado.`)
+        mostrarToast(`Quadra ${target.codigo} removida do mapa público. O histórico foi preservado.`)
       } catch {
-        mostrarToastCriacao(`Quadra ${target.codigo} removida do mapa público. O histórico foi preservado. A lista será sincronizada automaticamente.`)
+        mostrarToast(`Quadra ${target.codigo} removida do mapa público. O histórico foi preservado. A lista será sincronizada automaticamente.`)
       }
     }, { preserveDataOnRefreshFailure: true, openToolsPanel: false })
-  }, [carregar, deleteTarget, executarAdmin, mostrarToastCriacao])
+  }, [carregar, deleteTarget, executarAdmin, mostrarToast])
 
   return (
     <section className={toolsPanelOpen ? 'admin-map admin-map--tools-open' : 'admin-map'}>
-      {creationToast && (
-        <p className="admin-map-feedback admin-map-feedback--message admin-map-feedback--success" role="status" aria-live="polite">
-          {creationToast}
+      {mapToast && (
+        <p className={`admin-map-feedback admin-map-feedback--message admin-map-feedback--${mapToast.kind}`} role={mapToast.kind === 'error' ? 'alert' : 'status'} aria-live={mapToast.kind === 'error' ? 'assertive' : 'polite'}>
+          {mapToast.text}
         </p>
       )}
       <button
@@ -750,7 +738,6 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
           <button type="button" onClick={() => setToolsPanelOpen(false)} aria-label="Fechar ferramentas administrativas">×</button>
         </div>
         {(loading || busy) && <p className="admin-inline-feedback admin-inline-feedback--status" role="status">{loading ? 'Carregando quadras…' : 'Processando operação administrativa…'}</p>}
-        {feedback && <p className={`admin-inline-feedback admin-inline-feedback--${feedback.kind}`} role={feedback.kind === 'error' ? 'alert' : 'status'} aria-live={feedback.kind === 'error' ? 'assertive' : 'polite'}>{feedback.text}</p>}
         <div className="admin-map-toolbar">
           <div className="admin-status-summary" role="group" aria-label="Resumo das quadras ativas">
             <span className="admin-status-summary-item"><strong>{counts.total}</strong><span>Ativas</span></span>
