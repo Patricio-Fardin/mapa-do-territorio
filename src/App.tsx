@@ -155,7 +155,17 @@ function gravarPersistencia(record: GravacaoPersistida, expected: GravacaoPersis
   }
 }
 
-function aplicarEstilo(layer: Layer, situacao: Situacao) { (layer as L.Path).setStyle({ color: CORES[situacao], fillColor: CORES[situacao], fillOpacity: .42, opacity: .95, weight: 2 }) }
+function aplicarEstilo(layer: Layer, situacao: Situacao) {
+  ;(layer as L.Path).setStyle({
+    color: situacao === 'pendente' ? '#aeb9bd' : CORES[situacao],
+    fillColor: situacao === 'pendente' ? '#cbd3d6' : CORES[situacao],
+    fillOpacity: situacao === 'pendente' ? .18 : .24,
+    opacity: .78,
+    weight: 1.1,
+    lineCap: 'round',
+    lineJoin: 'round',
+  })
+}
 
 function calcularLimitesQuadras(quadras: Quadra[]): L.LatLngBounds | null {
   const limites = L.latLngBounds([])
@@ -279,6 +289,8 @@ function PersistedLayers({ quadras, onSelect, layers }: { quadras: Quadra[]; onS
       const parts: L.Layer[] = []
       feature.eachLayer((item) => {
         aplicarEstilo(item, quadra.situacao)
+        item.on('mouseover', () => (item as L.Path).setStyle({ fillOpacity: .3, weight: 1.6, opacity: 1 }))
+        item.on('mouseout', () => aplicarEstilo(item, quadra.situacao))
         item.on('click', () => onSelect(quadra.id))
         parts.push(item)
         group.addLayer(item)

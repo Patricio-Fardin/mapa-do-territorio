@@ -12,6 +12,7 @@ import {
 
 type Situacao = SituacaoQuadra
 type Quadra = { id: string; codigo: string; situacao: Situacao; updatedAt: string | null; geometria: Geometry; ativa: boolean }
+type QuadraReferencia = { id: string; setor: string; codigo: string; geometria: Polygon }
 type GeometriaEditada = { id: string; geometria: Geometry }
 type RpcQuadra = { id?: string; codigo?: string; geometria?: Geometry }
 type Props = { adminEmail: string; onUnauthorized: () => void }
@@ -34,8 +35,16 @@ function carregarPreferenciaBaseMap(): AdminBasemap {
   }
 }
 
-function aplicarEstilo(layer: L.Layer, situacao: Situacao) {
-  ;(layer as L.Path).setStyle({ color: CORES[situacao], fillColor: CORES[situacao], fillOpacity: .42, opacity: .95, weight: 2 })
+function aplicarEstilo(layer: L.Layer, situacao: Situacao, selecionada = false) {
+  ;(layer as L.Path).setStyle({
+    color: selecionada ? '#236b79' : (situacao === 'pendente' ? '#aeb9bd' : CORES[situacao]),
+    fillColor: situacao === 'pendente' ? '#cbd3d6' : CORES[situacao],
+    fillOpacity: selecionada ? .28 : (situacao === 'pendente' ? .18 : .24),
+    opacity: selecionada ? .98 : .78,
+    weight: selecionada ? 2.4 : 1.1,
+    lineCap: 'round',
+    lineJoin: 'round',
+  })
 }
 
 function normalizarQuadras(rows: Array<{ id: string; codigo: string; geometria: Geometry; ativa: boolean; situacoes_quadras?: unknown }>): Quadra[] {
@@ -56,6 +65,19 @@ function mensagemErroLeitura(error: unknown): string {
   return error instanceof FormatoSituacaoQuadraInvalido
     ? 'O Supabase retornou uma situação de quadra inválida. A situação não foi presumida.'
     : 'Não foi possível carregar as quadras. Verifique a conexão e tente novamente.'
+}
+
+async function lerQuadrasReferencia(): Promise<QuadraReferencia[]> {
+  const url = import.meta.env.BASE_URL + 'data/quadras-referencia-ibge-alfredo-chaves.geojson'
+  const response = await fetch(url)
+  if (!response.ok) throw new Error('Não foi possível carregar a camada de referência.')
+  const payload = await response.json() as { features?: Array<{ id?: string; properties?: { reference_id?: string; cd_setor?: string; cd_quadra?: string }; geometry?: Polygon }> }
+  return (payload.features ?? []).flatMap((feature) => {
+    const properties = feature.properties
+    const geometry = feature.geometry
+    if (!properties?.cd_setor || !properties.cd_quadra || !geometry || geometry.type !== 'Polygon') return []
+    return [{ id: properties.reference_id ?? properties.cd_setor + '-' + properties.cd_quadra, setor: properties.cd_setor, codigo: properties.cd_quadra, geometria: geometry }]
+  })
 }
 
 async function lerQuadrasAtivas(): Promise<Quadra[]> {
@@ -136,6 +158,8 @@ function chaveGeometria(value: unknown): string {
 
 function AdminDrawingMap({
   quadras,
+  quadrasReferencia,
+  mostrarQuadrasReferencia,
   selectedId,
   busy,
   onSelect,
@@ -145,6 +169,8 @@ function AdminDrawingMap({
   onFeedback,
 }: {
   quadras: Quadra[]
+  quadrasReferencia: QuadraReferencia[]
+  mostrarQuadrasReferencia: boolean
   selectedId: string | null
   busy: boolean
   onSelect: (id: string) => void
@@ -155,6 +181,8 @@ function AdminDrawingMap({
 }) {
   const map = useMap()
   const [contextMenu, setContextMenu] = useState<{ quadraId: string; latlng: L.LatLng } | null>(null)
+  const [referencePopup, setReferencePopup] = useState<{ reference: QuadraReferencia; latlng: L.LatLng } | null>(null)
+  const referenceGroup = useRef<L.FeatureGroup | null>(null)
   const editableGroup = useRef<L.FeatureGroup | null>(null)
   const selectedEditGroup = useRef<L.FeatureGroup | null>(null)
   const idsByLayer = useRef(new WeakMap<L.Layer, string>())
@@ -175,23 +203,58 @@ function AdminDrawingMap({
   }, [busy, quadras])
 
   useEffect(() => {
+    const referenceLayers = L.featureGroup().addTo(map)
     const group = L.featureGroup().addTo(map)
     const selectedGroup = L.featureGroup().addTo(map)
+    referenceGroup.current = referenceLayers
     editableGroup.current = group
     selectedEditGroup.current = selectedGroup
     return () => {
+      referenceGroup.current = null
       editableGroup.current = null
       selectedEditGroup.current = null
       map.removeLayer(selectedGroup)
       map.removeLayer(group)
+      map.removeLayer(referenceLayers)
     }
   }, [map])
+
+  useEffect(() => {
+    const group = referenceGroup.current
+    if (!group) return
+    group.clearLayers()
+    if (!mostrarQuadrasReferencia) return
+    quadrasReferencia.forEach((reference) => {
+      const feature = L.geoJSON(reference.geometria)
+      feature.eachLayer((part) => {
+        const path = part as L.Path
+        const baseStyle: L.PathOptions = { color: '#267987', fillColor: '#65aeba', fillOpacity: .07, opacity: .88, weight: 1.35, dashArray: '5 4', lineCap: 'round', lineJoin: 'round' }
+        path.setStyle(baseStyle)
+        part.on('mouseover', () => path.setStyle({ ...baseStyle, fillOpacity: .2, weight: 2.2, opacity: 1 }))
+        part.on('mouseout', () => path.setStyle(baseStyle))
+        part.on('click', (event: L.LeafletMouseEvent) => {
+          L.DomEvent.stopPropagation(event.originalEvent)
+          setContextMenu(null)
+          setReferencePopup({ reference, latlng: event.latlng })
+        })
+        group.addLayer(part)
+      })
+    })
+    return () => { group.clearLayers() }
+  }, [map, quadrasReferencia, mostrarQuadrasReferencia])
+
+  useEffect(() => {
+    const attribution = 'Quadras de referência: <a href="https://ide.geobases.es.gov.br/layers/geonode:ibge_face_logradouros/metadata_detail" target="_blank" rel="noopener noreferrer">IBGE - Face de Logradouros (2019) / GEOBASES-ES</a>'
+    if (mostrarQuadrasReferencia && quadrasReferencia.length) map.attributionControl.addAttribution(attribution)
+    return () => { map.attributionControl.removeAttribution(attribution) }
+  }, [map, quadrasReferencia.length, mostrarQuadrasReferencia])
 
   useEffect(() => {
     const closeContextMenu = (event: L.LeafletMouseEvent) => {
       // Cliques originados em polígonos não devem fechar o menu que o próprio polígono abriu.
       if (event.sourceTarget !== map) return
       setContextMenu(null)
+      setReferencePopup(null)
     }
     map.on('click', closeContextMenu)
     return () => {
@@ -218,7 +281,12 @@ function AdminDrawingMap({
         polygons.forEach((polygon) => {
           const feature = L.geoJSON(polygon)
           feature.eachLayer((part) => {
-            aplicarEstilo(part, quadra.situacao)
+            const isSelected = quadra.id === selectedId
+            aplicarEstilo(part, quadra.situacao, isSelected)
+            part.on('mouseover', () => {
+              if (!busyRef.current) (part as L.Path).setStyle({ fillOpacity: isSelected ? .34 : .3, weight: isSelected ? 2.8 : 1.6, opacity: 1 })
+            })
+            part.on('mouseout', () => aplicarEstilo(part, quadra.situacao, isSelected))
             idsByLayer.current.set(part, quadra.id)
             part.on('click', (event: L.LeafletMouseEvent) => {
               L.DomEvent.stopPropagation(event.originalEvent)
@@ -400,6 +468,17 @@ function AdminDrawingMap({
 
   return (
     <>
+      {mostrarQuadrasReferencia && referencePopup && (
+        <Popup position={referencePopup.latlng} closeButton closeOnClick={false} autoClose={false} className="admin-reference-popup" eventHandlers={{ remove: () => setReferencePopup(null) }}>
+          <div className="admin-reference-popup-content">
+            <strong>Quadra de referência {referencePopup.reference.codigo}</strong>
+            <span>Setor IBGE: {referencePopup.reference.setor}</span>
+            <p>Contorno reconstruído a partir das faces de logradouro do IBGE (referência 2019). A base pode apresentar diferenças posicionais. Confira o limite no mapa antes de cadastrar.</p>
+            <button type="button" className="admin-reference-confirm" disabled={busy} onClick={() => { const geometry = referencePopup.reference.geometria; setReferencePopup(null); callbacks.current.onCreate(geometry) }}>Cadastrar esta quadra</button>
+            <button type="button" onClick={() => setReferencePopup(null)} disabled={busy}>Cancelar</button>
+          </div>
+        </Popup>
+      )}
       {contextMenu && contextQuadra && (
         <Popup
           position={contextMenu.latlng}
@@ -431,6 +510,8 @@ function AdminDrawingMap({
 
 export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
   const [quadras, setQuadras] = useState<Quadra[]>([])
+  const [quadrasReferencia, setQuadrasReferencia] = useState<QuadraReferencia[]>([])
+  const [mostrarQuadrasReferencia, setMostrarQuadrasReferencia] = useState(true)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState('')
@@ -458,6 +539,13 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
   useEffect(() => () => {
     if (mapToastTimeoutRef.current !== null) window.clearTimeout(mapToastTimeoutRef.current)
   }, [])
+  useEffect(() => {
+    let active = true
+    void lerQuadrasReferencia()
+      .then((references) => { if (active) setQuadrasReferencia(references) })
+      .catch(() => { if (active) mostrarFeedback('A camada de quadras de referência não pôde ser carregada. As ferramentas de desenho manual continuam disponíveis.') })
+    return () => { active = false }
+  }, [mostrarFeedback])
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(true)
   const [baseMap, setBaseMap] = useState<AdminBasemap>(carregarPreferenciaBaseMap)
@@ -770,6 +858,13 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
             </button>
           </div>
         </div>
+        <div className="admin-reference-control">
+          <label className="admin-reference-toggle">
+            <input type="checkbox" checked={mostrarQuadrasReferencia} onChange={(event) => setMostrarQuadrasReferencia(event.target.checked)} />
+            <span>Exibir quadras de referência (IBGE 2019)</span>
+          </label>
+          <p>{quadrasReferencia.length} contornos fechados reconstruídos de 150 quadras identificadas. As demais foram omitidas por não formarem um anel fechado. Camada auxiliar, não cadastral; confira cada limite antes de cadastrar.</p>
+        </div>
       </div>}
       <dialog
         ref={deleteDialogRef}
@@ -817,6 +912,8 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
           />
           <AdminDrawingMap
             quadras={quadras}
+            quadrasReferencia={quadrasReferencia}
+            mostrarQuadrasReferencia={mostrarQuadrasReferencia}
             selectedId={selectedId}
             busy={busy || loading}
             onSelect={setSelectedId}
