@@ -174,7 +174,7 @@ function AdminDrawingMap({
   selectedId: string | null
   busy: boolean
   onSelect: (id: string) => void
-  onCreate: (geometry: Geometry) => void
+  onCreate: (geometry: Geometry, afterCreated?: () => void) => void
   onGeometryEdit: (geometries: GeometriaEditada[]) => void
   onRequestDelete: (id: string) => void
   onFeedback: (text: string, kind?: AdminFeedback['kind']) => void
@@ -182,6 +182,7 @@ function AdminDrawingMap({
   const map = useMap()
   const [contextMenu, setContextMenu] = useState<{ quadraId: string; latlng: L.LatLng } | null>(null)
   const [referencePopup, setReferencePopup] = useState<{ reference: QuadraReferencia; latlng: L.LatLng } | null>(null)
+  const [hiddenReferenceIds, setHiddenReferenceIds] = useState<Set<string>>(() => new Set())
   const referenceGroup = useRef<L.FeatureGroup | null>(null)
   const editableGroup = useRef<L.FeatureGroup | null>(null)
   const selectedEditGroup = useRef<L.FeatureGroup | null>(null)
@@ -225,6 +226,7 @@ function AdminDrawingMap({
     group.clearLayers()
     if (!mostrarQuadrasReferencia) return
     quadrasReferencia.forEach((reference) => {
+      if (hiddenReferenceIds.has(reference.id)) return
       const feature = L.geoJSON(reference.geometria)
       feature.eachLayer((part) => {
         const path = part as L.Path
@@ -245,7 +247,7 @@ function AdminDrawingMap({
       })
     })
     return () => { group.clearLayers() }
-  }, [map, quadrasReferencia, mostrarQuadrasReferencia])
+  }, [map, quadrasReferencia, mostrarQuadrasReferencia, hiddenReferenceIds])
 
   useEffect(() => {
     const attribution = 'Quadras de referência: <a href="https://ide.geobases.es.gov.br/layers/geonode:ibge_face_logradouros/metadata_detail" target="_blank" rel="noopener noreferrer">IBGE - Face de Logradouros (2019) / GEOBASES-ES</a>'
@@ -474,8 +476,10 @@ function AdminDrawingMap({
           <div className="admin-reference-popup-content">
             <strong>Quadra de referência {referencePopup.reference.codigo}</strong>
             <span>Setor IBGE: {referencePopup.reference.setor}</span>
-            <p>Contorno reconstruído a partir das faces de logradouro do IBGE (referência 2019). A base pode apresentar diferenças posicionais. Confira o limite no mapa antes de cadastrar.</p>
+            <p>Contorno reconstruído a partir das faces de logradouro do IBGE (referência 2019). A base original será preservada.</p>
             <button type="button" className="admin-reference-confirm" disabled={busy} onClick={() => { const geometry = referencePopup.reference.geometria; setReferencePopup(null); callbacks.current.onCreate(geometry) }}>Adicionar ao mapa público</button>
+            <button type="button" disabled={busy} onClick={() => { const geometry = referencePopup.reference.geometria; setReferencePopup(null); callbacks.current.onCreate(geometry, () => { window.setTimeout(() => { const editButton = map.getContainer().querySelector<HTMLAnchorElement>('.leaflet-draw-edit-edit'); if (editButton && !editButton.classList.contains('leaflet-disabled')) editButton.click(); else callbacks.current.onFeedback('A quadra foi cadastrada. Selecione-a e escolha Editar Vértices para iniciar os ajustes.'); }, 300) }) }}>Editar vértices</button>
+            <button type="button" className="destructive-action" disabled={busy} onClick={() => { setHiddenReferenceIds((current) => new Set(current).add(referencePopup.reference.id)); setReferencePopup(null); callbacks.current.onFeedback('Referência IBGE ocultada apenas neste mapa administrativo. O arquivo original foi preservado.', 'success') }}>Excluir referência do mapa</button>
             <button type="button" onClick={() => setReferencePopup(null)} disabled={busy}>Cancelar</button>
           </div>
         </Popup>
@@ -661,7 +665,7 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
     }
   }, [adminEmail, carregar, limparFeedback, mostrarFeedback, onUnauthorized, setToolsPanelOpen])
 
-  const criar = useCallback((geometria: Geometry) => {
+  const criar = useCallback((geometria: Geometry, afterCreated?: () => void) => {
     void executarAdmin(async () => {
       if (!supabase) throw new Error('Supabase não configurado.')
       const existingQuadras = await carregar()
@@ -689,6 +693,7 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
       try {
         await carregar()
         setSelectedId(createdId)
+        afterCreated?.()
         mostrarToast(`Quadra ${codigo} criada com sucesso!`)
       } catch {
         setQuadras((current) => [...current, {
@@ -700,6 +705,7 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
           ativa: true,
         }])
         setSelectedId(created.id)
+        afterCreated?.()
         mostrarFeedback(`Quadra ${codigo} foi criada, mas a lista não pôde ser recarregada.`)
       }
     }, { openToolsPanel: false })
