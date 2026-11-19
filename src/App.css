@@ -995,3 +995,34 @@ button:hover { border-color: #287f73; }
   background: #f0faf3;
   color: #176b43;
 }
+
+/* Reset geral de status das quadras na area administrativa. */
+.admin-reset-control {
+  display: grid;
+  gap: .4rem;
+  margin-top: .7rem;
+  padding-top: .7rem;
+  border-top: 1px solid #dce5e6;
+}
+.admin-reset-button {
+  width: 100%;
+  min-height: 42px;
+  padding: .55rem .75rem;
+  border: 1px solid #a94b35;
+  border-radius: .55rem;
+  background: #fff5f2;
+  color: #8b3424;
+  font: inherit;
+  font-size: .82rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+.admin-reset-button:hover:not(:disabled) { background: #fce7e2; }
+.admin-reset-button:focus-visible { outline: 3px solid #c76a55; outline-offset: 2px; }
+.admin-reset-button:disabled { cursor: not-allowed; opacity: .5; }
+.admin-reset-control p {
+  margin: 0;
+  color: #52696e;
+  font-size: .74rem;
+  line-height: 1.4;
+}

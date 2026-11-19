@@ -755,6 +755,29 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
     }
   }, [deleteTarget])
 
+  const resetarQuadrasPendentes = useCallback(() => {
+    const totalParaResetar = counts.concluida + counts.refazer
+    if (!totalParaResetar || busy || loading) return
+
+    const confirmado = window.confirm(
+      `Atenção: esta ação tornará PENDENTES todas as ${totalParaResetar} quadras atualmente concluídas ou marcadas para refazer. Os desenhos e o histórico serão preservados. Deseja continuar?`,
+    )
+    if (!confirmado) return
+
+    void executarAdmin(async () => {
+      if (!supabase) throw new Error('Supabase não configurado.')
+      const { data, error } = await supabase.rpc('admin_resetar_quadras_pendentes')
+      if (error) throw new Error('Não foi possível redefinir as quadras. Nenhuma alteração foi confirmada.')
+      if (typeof data !== 'number' || !Number.isInteger(data) || data < 0) {
+        throw new Error('O banco não confirmou a quantidade de quadras redefinidas. Atualize a lista antes de tentar novamente.')
+      }
+      await carregar()
+      mostrarToast(data === 0
+        ? 'Todas as quadras já estavam pendentes.'
+        : `${data} quadra(s) redefinida(s) para Pendente. O histórico foi preservado.`)
+    }, { openToolsPanel: false })
+  }, [busy, carregar, counts.concluida, counts.refazer, executarAdmin, loading, mostrarToast])
+
   const excluirQuadra = useCallback(() => {
     if (!deleteTarget) return
     const target = deleteTarget
@@ -839,6 +862,17 @@ export default function AdminMap({ adminEmail, onUnauthorized }: Props) {
             <span className="admin-status-summary-item"><strong className="gray">{counts.pendente}</strong><span>Pend.</span></span>
             <span className="admin-status-summary-item"><strong className="green">{counts.concluida}</strong><span>Conc.</span></span>
             <span className="admin-status-summary-item"><strong className="orange">{counts.refazer}</strong><span>Refazer</span></span>
+          </div>
+          <div className="admin-reset-control">
+            <button
+              type="button"
+              className="admin-reset-button"
+              onClick={resetarQuadrasPendentes}
+              disabled={busy || loading || counts.concluida + counts.refazer === 0}
+            >
+              Tornar todas as quadras pendentes
+            </button>
+            <p>Redefine as quadras concluídas e as que precisam ser refeitas. Os desenhos e o histórico são mantidos.</p>
           </div>
         </div>
 
