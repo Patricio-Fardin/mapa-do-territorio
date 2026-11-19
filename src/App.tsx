@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { LocateFixed, Scan } from 'lucide-react'
+import { Check, Highlighter, LocateFixed, RotateCcw, Scan, X } from 'lucide-react'
 import { AttributionControl, MapContainer, TileLayer, useMap } from 'react-leaflet'
 import L, { type Layer } from 'leaflet'
 import AdminMap from './components/AdminMap'
+import TerritoryMarker from './components/TerritoryMarker'
 import { supabase } from './lib/supabase'
 import {
   FormatoSituacaoQuadraInvalido,
@@ -10,6 +11,7 @@ import {
   type SituacaoQuadra,
 } from './lib/quadra-status'
 import { criarIdentificacaoQuadra } from './lib/quadra-label'
+import { geometriaCruzaTracado } from './lib/territory-marking'
 import 'leaflet/dist/leaflet.css'
 import 'leaflet-draw/dist/leaflet.draw.css'
 import 'leaflet-draw'
@@ -869,6 +871,14 @@ function MapPage() {
   const [quadras, setQuadras] = useState<Quadra[]>([])
   const [quadrasCarregadas, setQuadrasCarregadas] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
+  const [marcacaoSituacao, setMarcacaoSituacao] = useState<Extract<Situacao, 'concluida' | 'refazer'> | null>(null)
+  const [marcacaoPainelAberto, setMarcacaoPainelAberto] = useState(false)
+  const [marcacaoAtiva, setMarcacaoAtiva] = useState(false)
+  const [quadrasMarcadas, setQuadrasMarcadas] = useState<Quadra[]>([])
+  const [marcacaoMensagem, setMarcacaoMensagem] = useState('')
+  const [marcacaoProcessando, setMarcacaoProcessando] = useState(false)
+  const [marcacaoClearVersion, setMarcacaoClearVersion] = useState(0)
+  const [marcacaoOperacaoId, setMarcacaoOperacaoId] = useState<string | null>(null)
   const [connectionStatus, setConnectionStatus] = useState<EstadoConexao>(client ? 'loading' : 'unknown')
   const [loadError, setLoadError] = useState('')
   const [refreshing, setRefreshing] = useState(false)
@@ -886,11 +896,11 @@ function MapPage() {
   )
   const [statusFeedbackQuadraId, setStatusFeedbackQuadraId] = useState<string | null>(null)
   useEffect(() => {
-    if (!statusFeedback || statusFeedbackKind !== 'error') return
+    if (!statusFeedback) return
     const timeout = window.setTimeout(() => {
       setStatusFeedback('')
       setStatusFeedbackQuadraId(null)
-    }, 2000)
+    }, 3500)
     return () => window.clearTimeout(timeout)
   }, [statusFeedback, statusFeedbackKind, statusFeedbackQuadraId])
   const statusLocks = useRef(new Set<string>())
@@ -1319,6 +1329,110 @@ function MapPage() {
     refazer: quadras.filter((quadra) => quadra.situacao === 'refazer').length,
   }), [quadras])
 
+  const receberTracado = useCallback((points: Array<[number, number]>) => {
+    const encontradas = quadras.filter((quadra) => geometriaCruzaTracado(quadra.geometria, points, mapRef.current))
+    if (!encontradas.length) {
+      setMarcacaoMensagem('O traço não cruzou nenhuma quadra cadastrada. Tente novamente sobre as áreas coloridas.')
+      setMarcacaoAtiva(true)
+      return
+    }
+    if (encontradas.length > 250) {
+      setMarcacaoMensagem('A marcação alcançou mais de 250 quadras. Divida o território em áreas menores e tente novamente.')
+      setMarcacaoAtiva(true)
+      return
+    }
+    setQuadrasMarcadas(encontradas)
+    setMarcacaoOperacaoId(null)
+    setMarcacaoMensagem('')
+    setMarcacaoAtiva(false)
+  }, [quadras])
+
+  const iniciarMarcacao = (situacao: Extract<Situacao, 'concluida' | 'refazer'>) => {
+    setMarcacaoPainelAberto(true)
+    selectedRef.current = null
+    setSelected(null)
+    setMarcacaoSituacao(situacao)
+    setQuadrasMarcadas([])
+    setMarcacaoMensagem('')
+    setMarcacaoOperacaoId(null)
+    setMarcacaoClearVersion((version) => version + 1)
+    setMarcacaoAtiva(true)
+  }
+
+  const cancelarMarcacao = () => {
+    setMarcacaoPainelAberto(false)
+    setMarcacaoSituacao(null)
+    setMarcacaoAtiva(false)
+    setQuadrasMarcadas([])
+    setMarcacaoMensagem('')
+    setMarcacaoOperacaoId(null)
+    setMarcacaoClearVersion((version) => version + 1)
+    setMarcacaoProcessando(false)
+  }
+
+  const confirmarMarcacao = async () => {
+    if (!client || !marcacaoSituacao || !quadrasMarcadas.length || marcacaoProcessando) return
+    if (pendingSave || statusLocks.current.size > 0) {
+      setMarcacaoMensagem('Aguarde a outra atualização terminar antes de confirmar esta marcação.')
+      return
+    }
+    const operacaoId = marcacaoOperacaoId ?? crypto.randomUUID()
+    const lista = [...quadrasMarcadas]
+      .sort((a, b) => a.id.localeCompare(b.id))
+      .map((quadra) => ({ id: quadra.id, versao: quadra.versao }))
+    setMarcacaoOperacaoId(operacaoId)
+    setMarcacaoProcessando(true)
+    setMarcacaoMensagem('Atualizando as quadras…')
+    try {
+      const { data, error } = await client.rpc('aplicar_marcacao_territorio', {
+        p_operacao_id: operacaoId,
+        p_situacao: marcacaoSituacao,
+        p_quadras: lista,
+      })
+      if (error) throw error
+      if (!data || typeof data !== 'object' || !('status' in data) || typeof data.status !== 'string') {
+        throw new Error('O servidor não confirmou o resultado da marcação.')
+      }
+      if (data.status === 'conflict') {
+        await carregarQuadras(true)
+        setMarcacaoOperacaoId(null)
+        setQuadrasMarcadas([])
+        setMarcacaoClearVersion((version) => version + 1)
+        setMarcacaoAtiva(true)
+        setMarcacaoMensagem('Uma ou mais quadras foram atualizadas por outra pessoa. Faça a marcação novamente para conferir os dados atuais.')
+        return
+      }
+      if (data.status !== 'updated' && data.status !== 'replayed') {
+        throw new Error('O servidor retornou uma resposta inesperada.')
+      }
+      const resultado = data as {
+        total_recebidas?: number
+        total_alteradas?: number
+        quadras?: Array<{ id: string; situacao: Situacao; versao: number; updated_at: string }>
+      }
+      if (!Array.isArray(resultado.quadras) || resultado.quadras.length !== lista.length) {
+        throw new Error('A resposta não confirmou todas as quadras. Repita a confirmação para consultar a mesma operação.')
+      }
+      const atualizacoes = new Map(resultado.quadras.map((item) => [item.id, item]))
+      setQuadras((atuais) => atuais.map((quadra) => {
+        const atualizada = atualizacoes.get(quadra.id)
+        return atualizada
+          ? { ...quadra, situacao: atualizada.situacao, versao: atualizada.versao, updatedAt: atualizada.updated_at }
+          : quadra
+      }))
+      const totalAlteradas = resultado.total_alteradas ?? 0
+      cancelarMarcacao()
+      setStatusFeedback(`${totalAlteradas} de ${lista.length} quadra(s) atualizada(s) com sucesso.`)
+      setStatusFeedbackKind('success')
+      setStatusFeedbackQuadraId(null)
+      void carregarQuadras(true)
+    } catch {
+      setMarcacaoMensagem('Não foi possível confirmar a gravação. Confira a conexão e toque em “Confirmar atualização” novamente; o sistema consultará a mesma operação para evitar duplicidades.')
+    } finally {
+      setMarcacaoProcessando(false)
+    }
+  }
+
   const restaurarVisaoMapa = () => {
     const map = mapRef.current
     if (!map) return
@@ -1712,8 +1826,8 @@ function MapPage() {
         {podeTentarNovamente && <button type="button" className="retry-load" onClick={() => { setNoticeDismissed(false); void carregarQuadras(true) }} disabled={refreshing} aria-label="Tentar carregar as quadras novamente">{refreshing ? 'Atualizando…' : 'Tentar novamente'}</button>}
         {quadrasCarregadas && <button type="button" className="dismiss-notice" onClick={() => setNoticeDismissed(true)} aria-label="Fechar aviso de conexão">×</button>}
       </section>}
-      {statusFeedback && statusFeedbackKind === 'error' && (
-        <div className="status-toast" role="status" aria-live="polite">
+      {statusFeedback && (
+        <div className={`status-toast status-toast--${statusFeedbackKind}`} role="status" aria-live="polite">
           {statusFeedback}
         </div>
       )}
@@ -1728,6 +1842,12 @@ function MapPage() {
           <AttributionControl position="bottomleft" />
           <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
           <PersistedLayers quadras={quadras} onSelect={select} layers={layers} />
+          <TerritoryMarker
+            enabled={marcacaoAtiva && Boolean(marcacaoSituacao)}
+            situacao={marcacaoSituacao ?? 'concluida'}
+            clearVersion={marcacaoClearVersion}
+            onComplete={receberTracado}
+          />
         </MapContainer>
         <div className="map-navigation-controls" role="group" aria-label="Controles do mapa">
           <button
@@ -1743,6 +1863,45 @@ function MapPage() {
           <button type="button" className="map-navigation-button restore-map-view" onClick={restaurarVisaoMapa} aria-label="Restaurar visão do mapa" title="Restaurar visão do mapa">
             <Scan size={24} strokeWidth={1.8} aria-hidden="true" focusable="false" />
           </button>
+        </div>
+        <div className="territory-marking-panel" aria-live="polite">
+          {!marcacaoPainelAberto ? (
+            <button type="button" className="territory-marking-toggle" onClick={() => setMarcacaoPainelAberto(true)} disabled={!podeAlterar}>
+              <Highlighter size={21} aria-hidden="true" /> Marcar território
+            </button>
+          ) : !marcacaoSituacao ? (
+            <div className="territory-marking-card">
+              <strong>O que deseja marcar?</strong>
+              <button type="button" className="territory-marking-choice territory-marking-choice--done" onClick={() => iniciarMarcacao('concluida')} disabled={!podeAlterar}>
+                <Check size={18} aria-hidden="true" /> Trabalho realizado
+              </button>
+              <button type="button" className="territory-marking-choice territory-marking-choice--redo" onClick={() => iniciarMarcacao('refazer')} disabled={!podeAlterar}>
+                <RotateCcw size={18} aria-hidden="true" /> Precisa refazer
+              </button>
+              <button type="button" className="territory-marking-cancel" onClick={cancelarMarcacao}><X size={16} aria-hidden="true" /> Fechar</button>
+            </div>
+          ) : quadrasMarcadas.length > 0 ? (
+            <div className="territory-marking-card">
+              <strong>{quadrasMarcadas.length} quadra(s) identificada(s)</strong>
+              <p>Serão marcadas como <b>{marcacaoSituacao === 'concluida' ? 'Concluídas' : 'Precisa refazer'}</b>.</p>
+              <div className="territory-marking-codes">{quadrasMarcadas.map((quadra) => quadra.codigo).join(' · ')}</div>
+              {marcacaoMensagem && <p className="territory-marking-message" role="status">{marcacaoMensagem}</p>}
+              <button type="button" className="territory-marking-confirm" onClick={() => void confirmarMarcacao()} disabled={marcacaoProcessando}>
+                <Check size={18} aria-hidden="true" /> {marcacaoProcessando ? 'Salvando…' : 'Confirmar atualização'}
+              </button>
+              <button type="button" className="territory-marking-cancel" onClick={() => { setQuadrasMarcadas([]); setMarcacaoOperacaoId(null); setMarcacaoClearVersion((version) => version + 1); setMarcacaoAtiva(true); setMarcacaoMensagem('') }} disabled={marcacaoProcessando}>
+                <RotateCcw size={16} aria-hidden="true" /> Refazer marcação
+              </button>
+              <button type="button" className="territory-marking-cancel" onClick={cancelarMarcacao} disabled={marcacaoProcessando}>Cancelar</button>
+            </div>
+          ) : (
+            <div className="territory-marking-card">
+              <strong>{marcacaoSituacao === 'concluida' ? 'Marcar trabalho realizado' : 'Marcar áreas para refazer'}</strong>
+              <p>Arraste o dedo ou o mouse sobre as quadras no mapa. Depois confira a lista antes de salvar.</p>
+              {marcacaoMensagem && <p className="territory-marking-message" role="status">{marcacaoMensagem}</p>}
+              <button type="button" className="territory-marking-cancel" onClick={cancelarMarcacao}><X size={16} aria-hidden="true" /> Cancelar</button>
+            </div>
+          )}
         </div>
         {locationMessage && <p className="map-location-feedback" role="status" aria-live="polite">{locationMessage}</p>}
       </section>

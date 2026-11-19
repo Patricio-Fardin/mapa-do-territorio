@@ -907,3 +907,91 @@ button:hover { border-color: #287f73; }
 .admin-reference-popup-content button.admin-reference-confirm { border-color: #267987; background: #267987; color: #fff; }
 .admin-reference-popup-content button:disabled { cursor: not-allowed; opacity: .6; }
 .admin-reference-popup-content button:focus-visible { outline: 3px solid #3a8791; outline-offset: 2px; }
+
+/* Marcador temporario de territorios no mapa publico. */
+.territory-marking-panel {
+  position: absolute;
+  z-index: 950;
+  left: max(.75rem, env(safe-area-inset-left));
+  bottom: max(.9rem, env(safe-area-inset-bottom));
+  width: min(330px, calc(100% - 1.5rem));
+  pointer-events: none;
+}
+.territory-marking-panel button { pointer-events: auto; }
+.territory-marking-toggle {
+  display: inline-flex;
+  min-height: 50px;
+  align-items: center;
+  justify-content: center;
+  gap: .55rem;
+  padding: .75rem 1rem;
+  border: 1px solid rgb(255 255 255 / 85%);
+  border-radius: 999px;
+  background: #193f46;
+  color: #fff;
+  box-shadow: 0 4px 16px rgb(25 50 56 / 25%);
+  font-weight: 800;
+}
+.territory-marking-toggle:disabled { opacity: .55; cursor: not-allowed; }
+.territory-marking-card {
+  display: grid;
+  gap: .55rem;
+  max-height: min(46vh, 340px);
+  overflow: auto;
+  padding: .9rem;
+  border: 1px solid #d6e1e3;
+  border-radius: .85rem;
+  background: rgb(255 255 255 / 97%);
+  color: #193238;
+  box-shadow: 0 5px 22px rgb(25 50 56 / 24%);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  pointer-events: auto;
+}
+.territory-marking-card > strong { font-size: .98rem; }
+.territory-marking-card p { margin: 0; color: #52696e; font-size: .84rem; line-height: 1.4; }
+.territory-marking-choice,
+.territory-marking-confirm {
+  display: flex;
+  min-height: 46px;
+  align-items: center;
+  justify-content: center;
+  gap: .5rem;
+  font-weight: 800;
+}
+.territory-marking-choice--done { border-color: #168548; background: #168548; color: #fff; }
+.territory-marking-choice--redo { border-color: #b95700; background: #b95700; color: #fff; }
+.territory-marking-confirm { border-color: #176b43; background: #176b43; color: #fff; }
+.territory-marking-cancel {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: .35rem;
+  border-color: transparent;
+  background: transparent;
+  color: #52696e;
+  font-weight: 700;
+}
+.territory-marking-codes {
+  max-height: 76px;
+  overflow: auto;
+  padding: .5rem;
+  border-radius: .45rem;
+  background: #f1f5f5;
+  color: #344e53;
+  font-size: .78rem;
+  line-height: 1.5;
+}
+.territory-marking-message { color: #9a4b08 !important; font-weight: 700; }
+@media (max-width: 640px) {
+  .territory-marking-panel { bottom: calc(.75rem + env(safe-area-inset-bottom)); }
+  .territory-marking-card { max-height: min(42vh, 300px); padding: .75rem; }
+  .territory-marking-toggle { min-height: 48px; }
+}
+
+.status-toast--success {
+  border-color: #a8d5b8;
+  background: #f0faf3;
+  color: #176b43;
+}
