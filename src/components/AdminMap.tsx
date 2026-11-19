@@ -232,11 +232,15 @@ function AdminDrawingMap({
         path.setStyle(baseStyle)
         part.on('mouseover', () => path.setStyle({ ...baseStyle, fillOpacity: .2, weight: 2.2, opacity: 1 }))
         part.on('mouseout', () => path.setStyle(baseStyle))
-        part.on('click', (event: L.LeafletMouseEvent) => {
+        const abrirCadastroReferencia = (event: L.LeafletMouseEvent) => {
+          L.DomEvent.preventDefault(event.originalEvent)
           L.DomEvent.stopPropagation(event.originalEvent)
           setContextMenu(null)
           setReferencePopup({ reference, latlng: event.latlng })
-        })
+        }
+        part.on('click', abrirCadastroReferencia)
+        // O clique direito também oferece o cadastro das quadras de referência.
+        part.on('contextmenu', abrirCadastroReferencia)
         group.addLayer(part)
       })
     })
@@ -300,11 +304,8 @@ function AdminDrawingMap({
             part.on('contextmenu', (event: L.LeafletMouseEvent) => {
               L.DomEvent.preventDefault(event.originalEvent)
               L.DomEvent.stopPropagation(event.originalEvent)
-              if (quadra.id !== selectedId) {
-                setContextMenu(null)
-                callbacks.current.onSelect(quadra.id)
-                return
-              }
+              if (quadra.id !== selectedId) callbacks.current.onSelect(quadra.id)
+              // Abre o menu já no primeiro clique direito, mesmo quando a quadra ainda não estava selecionada.
               setContextMenu({ quadraId: quadra.id, latlng: event.latlng })
             })
             part.on('dblclick', (event: L.LeafletMouseEvent) => L.DomEvent.stopPropagation(event.originalEvent))
@@ -474,7 +475,7 @@ function AdminDrawingMap({
             <strong>Quadra de referência {referencePopup.reference.codigo}</strong>
             <span>Setor IBGE: {referencePopup.reference.setor}</span>
             <p>Contorno reconstruído a partir das faces de logradouro do IBGE (referência 2019). A base pode apresentar diferenças posicionais. Confira o limite no mapa antes de cadastrar.</p>
-            <button type="button" className="admin-reference-confirm" disabled={busy} onClick={() => { const geometry = referencePopup.reference.geometria; setReferencePopup(null); callbacks.current.onCreate(geometry) }}>Cadastrar esta quadra</button>
+            <button type="button" className="admin-reference-confirm" disabled={busy} onClick={() => { const geometry = referencePopup.reference.geometria; setReferencePopup(null); callbacks.current.onCreate(geometry) }}>Adicionar ao mapa público</button>
             <button type="button" onClick={() => setReferencePopup(null)} disabled={busy}>Cancelar</button>
           </div>
         </Popup>
